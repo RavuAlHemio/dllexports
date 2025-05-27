@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "dllexports",
+    "expandms",
+]
+resolver = "2"
