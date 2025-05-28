@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::io::{self, Read};
+
+use crate::io_util::BitReader;
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -123,6 +127,41 @@ impl<T> HuffmanTree<T> {
                 HuffmanNode::Leaf(l) => {
                     // we've reached the bottom
                     return Some(&l.value);
+                },
+            }
+        }
+    }
+
+    pub fn decode_one_bit_reader<R: Read, const MSB_TO_LSB: bool>(
+        &self,
+        bit_reader: &mut BitReader<&mut R, MSB_TO_LSB>,
+    ) -> Result<Option<&T>, io::Error> {
+        let mut current_node = &self.root_node;
+        let mut first_iteration = true;
+        loop {
+            let take_true_branch = match bit_reader.read_bit() {
+                Ok(Some(b)) => b,
+                Ok(None) => return if first_iteration {
+                    Ok(None)
+                } else {
+                    Err(io::ErrorKind::UnexpectedEof.into())
+                },
+                Err(e) => return Err(e),
+            };
+            first_iteration = false;
+
+            let branch_taken = if take_true_branch {
+                &*current_node.true_child
+            } else {
+                &*current_node.false_child
+            };
+            match branch_taken {
+                HuffmanNode::Branch(b) => {
+                    current_node = b;
+                },
+                HuffmanNode::Leaf(l) => {
+                    // we've reached the bottom
+                    return Ok(Some(&l.value));
                 },
             }
         }
