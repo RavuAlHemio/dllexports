@@ -4,16 +4,20 @@ use std::fmt;
 #[derive(Debug)]
 pub enum DecompressionError {
     Io(std::io::Error),
+    UnknownCompressionMethod,
     Huffman(crate::huff::HuffmanConstructionError),
     UnknownHuffmanTreeEncoding { encoding: u8 },
     UnexpectedHuffmanSymbolCount { symbol_count: usize },
     RelativeValueUnderflow,
+    DataOffsetWithinHeader,
 }
 impl fmt::Display for DecompressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e)
                 => write!(f, "I/O error: {}", e),
+            Self::UnknownCompressionMethod
+                => write!(f, "unknown compression method"),
             Self::Huffman(e)
                 => write!(f, "Huffman tree construction error: {}", e),
             Self::UnknownHuffmanTreeEncoding { encoding }
@@ -22,6 +26,8 @@ impl fmt::Display for DecompressionError {
                 => write!(f, "unexpected symbol count {} for Huffman tree", symbol_count),
             Self::RelativeValueUnderflow
                 => write!(f, "a relative value would underflow 0"),
+            Self::DataOffsetWithinHeader
+                => write!(f, "data offset points to a location within the header"),
         }
     }
 }
@@ -29,10 +35,12 @@ impl std::error::Error for DecompressionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e),
+            Self::UnknownCompressionMethod => None,
             Self::Huffman(e) => Some(e),
             Self::UnknownHuffmanTreeEncoding { .. } => None,
             Self::UnexpectedHuffmanSymbolCount { .. } => None,
             Self::RelativeValueUnderflow => None,
+            Self::DataOffsetWithinHeader => None,
         }
     }
 }

@@ -1,3 +1,6 @@
+/// Decompressor for the Lempel-Ziv + Huffman combo created by Jeff Johnson.
+
+
 use std::io::{self, Read, Write};
 
 use crate::error::DecompressionError;
@@ -95,16 +98,20 @@ fn create_huffman_tree<R: Read>(compressed_reader: &mut BitReader<&mut R, true>,
 }
 
 
-fn decompress_lzh<R: Read, W: Write>(compressed_reader: &mut R, decompressed_writer: &mut W) -> Result<(), DecompressionError> {
+pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompressed_writer: &mut W) -> Result<(), DecompressionError> {
+    // assuming we have already read the b"KWAJ\x88\xF0\x27\xD1" magic,
+    // the compression type byte 0x03, the compressed data offset word
+    // and all the data preceding the compressed data offset
+
     // read 3 bytes containing encoding types
     let mut encoding_types = [0u8; 3];
     compressed_reader.read_exact(&mut encoding_types)?;
 
-    let match_run_lengths_encoding_type = (encoding_types[0] >> 8) & 0x0F;
+    let match_run_lengths_encoding_type = (encoding_types[0] >> 4) & 0x0F;
     let match_run_lengths_after_short_encoding_type = (encoding_types[0] >> 0) & 0x0F;
-    let literal_run_lengths_encoding_type = (encoding_types[1] >> 8) & 0x0F;
+    let literal_run_lengths_encoding_type = (encoding_types[1] >> 4) & 0x0F;
     let offset_tops_encoding_type = (encoding_types[1] >> 0) & 0x0F;
-    let literals_encoding_type = (encoding_types[2] >> 8) & 0x0F;
+    let literals_encoding_type = (encoding_types[2] >> 4) & 0x0F;
     // bottom half of encoding_types[2] is padding
 
     // wrap reader into bit reader
