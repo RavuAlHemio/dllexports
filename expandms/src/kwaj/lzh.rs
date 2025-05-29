@@ -187,7 +187,7 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
             if literal_length != 31 {
                 current_lookup = &match_run_lengths_after_short;
             }
-            for _ in 0..literal_length {
+            for _ in 0..literal_length+1 {
                 let byte = match literals.decode_one_from_bit_reader(&mut bit_reader) {
                     Ok(Some(b)) => *b,
                     Ok(None) => return Ok(()),
