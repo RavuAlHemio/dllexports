@@ -41,8 +41,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
         self.bit_index += 1;
         if self.bit_index == 8 {
             // prepare for next byte
-            self.bit_index = 0;
-            self.byte_picked_apart = None;
+            self.drop_rest_of_byte();
         }
 
         Ok(Some(bit_is_set))
@@ -55,6 +54,11 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
             Err(e) => Err(e),
         }
     }
+
+    pub fn drop_rest_of_byte(&mut self) {
+        self.bit_index = 0;
+        self.byte_picked_apart = None;
+    }
 }
 
 macro_rules! impl_read_n_bits {
@@ -64,10 +68,10 @@ macro_rules! impl_read_n_bits {
             for i in 0..$bit_count {
                 let bit = self.read_bit_strict()?;
                 if MSB_TO_LSB {
+                    ret <<= 1;
                     if bit {
                         ret |= 1;
                     }
-                    ret <<= 1;
                 } else {
                     if bit {
                         ret |= (1 << i);

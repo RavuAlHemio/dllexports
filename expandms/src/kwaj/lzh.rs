@@ -92,9 +92,24 @@ fn create_huffman_tree<R: Read>(compressed_reader: &mut BitReader<&mut R, true>,
         },
         other => return Err(DecompressionError::UnknownHuffmanTreeEncoding { encoding: other }),
     };
+    assert!(symbol_lengths.len() == symbol_count);
 
     let tree = HuffmanTree::new_canonical(&symbol_lengths)?;
     Ok(tree)
+}
+
+
+fn ignore_eof(operation_result: Result<(), io::Error>) -> Result<(), DecompressionError> {
+    match operation_result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if e.kind() == io::ErrorKind::UnexpectedEof {
+                Ok(())
+            } else {
+                Err(DecompressionError::Io(e))
+            }
+        },
+    }
 }
 
 
@@ -124,37 +139,61 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
     let offset_tops = create_huffman_tree(&mut bit_reader, 64, offset_tops_encoding_type)?;
     let literals = create_huffman_tree(&mut bit_reader, 256, literals_encoding_type)?;
 
-    let mut ring_buffer: RingBuffer<u8, 4096> = RingBuffer::new(0x20);
-    ring_buffer.set_position(4096 - 17);
+    const RING_BUFFER_SIZE: usize = 4096;
+    let mut ring_buffer: RingBuffer<u8, RING_BUFFER_SIZE> = RingBuffer::new(0x20);
+    ring_buffer.set_position(RING_BUFFER_SIZE - 17);
     let mut current_lookup = &match_run_lengths;
-    while let Some(&code) = current_lookup.decode_one_bit_reader(&mut bit_reader)? {
+    while let Some(&code) = current_lookup.decode_one_from_bit_reader(&mut bit_reader)? {
+        // note that there is no end symbol, so if we run out of bits midway, we just exit
+        println!("pos is {}", ring_buffer.position());
+
         if code > 0 {
             // match
             let match_length_u8 = code + 2;
             let match_length: usize = match_length_u8.into();
-            let offset_top_u8 = *offset_tops.decode_one_bit_reader(&mut bit_reader)?
-                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
-            let offset_bottom_u8 = bit_reader.read_u6()?;
-            let offset_top: usize = offset_top_u8.into();
-            let offset_bottom: usize = offset_bottom_u8.into();
-            let match_offset = ring_buffer.position() - (offset_top << 6 | offset_bottom);
+            let offset_top = match offset_tops.decode_one_from_bit_reader(&mut bit_reader) {
+                Ok(Some(ot)) => *ot,
+                Ok(None) => return Ok(()),
+                Err(e) => return ignore_eof(Err(e)),
+            };
+            let offset_bottom = match bit_reader.read_u6() {
+                Ok(ob) => ob,
+                Err(e) => return ignore_eof(Err(e)),
+            };
+            let offset =
+                (usize::from(offset_top) << 6)
+                | usize::from(offset_bottom);
+            println!("offset is {}, len is {}", match_length, offset);
+            let mut match_offset = (ring_buffer.position() + RING_BUFFER_SIZE - offset) % RING_BUFFER_SIZE;
 
-            // copy match from ring buffer at [match_offset..match_offset+match_length]
-            // then output it *and* store it at ring_buffer_pos
-            let match_vec = ring_buffer.as_slice()[match_offset..match_offset+match_length].to_vec();
-            decompressed_writer.write_all(&match_vec)?;
-            ring_buffer.extend(match_vec);
+            // copy match_length bytes starting at match_offset
+            // both into the output and into the current ring buffer position
+            for _ in 0..match_length {
+                let match_buf = [ring_buffer.as_slice()[match_offset]];
+                println!("  I got {:02x}", match_buf[0]);
+                decompressed_writer.write_all(&match_buf)?;
+                ring_buffer.extend(match_buf);
+                match_offset = (match_offset + 1) % RING_BUFFER_SIZE;
+            }
             current_lookup = &match_run_lengths;
         } else {
             // run of literals
-            let literal_length = *literal_run_lengths.decode_one_bit_reader(&mut bit_reader)?
-                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+            let literal_length = match literal_run_lengths.decode_one_from_bit_reader(&mut bit_reader) {
+                Ok(Some(ll)) => *ll,
+                Ok(None) => return Ok(()),
+                Err(e) => return ignore_eof(Err(e)),
+            };
+            println!("literal len is {}", literal_length);
             if literal_length != 31 {
                 current_lookup = &match_run_lengths_after_short;
             }
             for _ in 0..literal_length {
-                let byte = *literals.decode_one_bit_reader(&mut bit_reader)?
-                    .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+                let byte = match literals.decode_one_from_bit_reader(&mut bit_reader) {
+                    Ok(Some(b)) => *b,
+                    Ok(None) => return Ok(()),
+                    Err(e) => return ignore_eof(Err(e)),
+                };
+                println!("  I got {:02x}", byte);
                 decompressed_writer.write_all(&[byte])?;
                 ring_buffer.push(byte);
             }

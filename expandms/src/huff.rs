@@ -132,7 +132,7 @@ impl<T> HuffmanTree<T> {
         }
     }
 
-    pub fn decode_one_bit_reader<R: Read, const MSB_TO_LSB: bool>(
+    pub fn decode_one_from_bit_reader<R: Read, const MSB_TO_LSB: bool>(
         &self,
         bit_reader: &mut BitReader<&mut R, MSB_TO_LSB>,
     ) -> Result<Option<&T>, io::Error> {
@@ -177,19 +177,28 @@ impl<T: HuffmanCanonicalizable> HuffmanTree<T> {
     ///
     /// For built-in primitive integer types, the initial element is mapped to 0, the next to 1,
     /// etc.
+    ///
+    /// A 0 value in `symbol_lengths` is a "skip", i.e. the corresponding symbol shall not be
+    /// encodable through the resulting Huffman tree.
     pub fn new_canonical(symbol_lengths: &[usize]) -> Result<Self, HuffmanConstructionError> {
         // at least one length; all lengths greater than zero
         assert!(symbol_lengths.len() > 0);
-        assert!(symbol_lengths.iter().all(|l| *l > 0));
 
         // convert to pairs of symbol and symbol length
         let mut lengths_and_symbols = Vec::with_capacity(symbol_lengths.len());
         let mut current_symbol = T::first_value();
-        for &symbol_length in symbol_lengths {
+        for &symbol_length in &symbol_lengths[..symbol_lengths.len()-1] {
             let next_symbol = current_symbol.incremented();
             assert!(next_symbol > current_symbol);
-            lengths_and_symbols.push((symbol_length, current_symbol));
+            if symbol_length > 0 {
+                lengths_and_symbols.push((symbol_length, current_symbol));
+            }
             current_symbol = next_symbol;
+        }
+        // add the final one without incrementing once too many
+        let last_symbol_length = *symbol_lengths.last().unwrap();
+        if last_symbol_length > 0 {
+            lengths_and_symbols.push((last_symbol_length, current_symbol));
         }
 
         // re-sort by symbol length, then by value
