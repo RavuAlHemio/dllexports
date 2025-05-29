@@ -143,8 +143,15 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
     let mut ring_buffer: RingBuffer<u8, RING_BUFFER_SIZE> = RingBuffer::new(0x20);
     ring_buffer.set_position(RING_BUFFER_SIZE - 17);
     let mut current_lookup = &match_run_lengths;
-    while let Some(&code) = current_lookup.decode_one_from_bit_reader(&mut bit_reader)? {
+    loop {
         // note that there is no end symbol, so if we run out of bits midway, we just exit
+
+        let code = match current_lookup.decode_one_from_bit_reader(&mut bit_reader) {
+            Ok(Some(c)) => *c,
+            Ok(None) => return Ok(()),
+            Err(e) => return ignore_eof(Err(e)),
+        };
+
         println!("pos is {}", ring_buffer.position());
 
         if code > 0 {
@@ -199,6 +206,4 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
             }
         }
     }
-
-    Ok(())
 }
