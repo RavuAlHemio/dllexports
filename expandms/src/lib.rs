@@ -1,4 +1,5 @@
 mod error;
+pub mod fat;
 mod huff;
 mod io_util;
 mod kwaj;
