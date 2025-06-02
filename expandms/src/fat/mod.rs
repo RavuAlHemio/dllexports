@@ -2,7 +2,12 @@
 //!
 //! Should support FAT12/FAT16/FAT32 from MS-DOS 2.0 onward.
 
-use std::{io::{self, Read, Seek, SeekFrom}, thread::current};
+
+use std::io::{self, Read, Seek, SeekFrom};
+
+use bitflags::bitflags;
+
+use crate::DisplayBytes;
 
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -112,6 +117,17 @@ impl FatHeader {
 
     pub fn fat_bytes(&self) -> usize {
         usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.bytes_per_sector)
+    }
+
+    pub fn first_data_sector(&self) -> u32 {
+        // 1. reserved sectors
+        // 2. sectors with FATs
+        // 3. sectors with root directory
+        // 4. data sectors
+
+        u32::from(self.reserved_sector_count)
+            + u32::from(self.fat_count) * self.sectors_per_fat
+            + u32::from(self.max_root_dir_entries) * 32 / u32::from(self.bytes_per_sector)
     }
 }
 
@@ -236,12 +252,18 @@ fn read_next_cluster_into<R: Read>(reader: &mut R, header: &FatHeader, output: &
 }
 
 fn seek_to_cluster<R: Seek>(reader: &mut R, header: &FatHeader, cluster_index: u32) -> Result<(), io::Error> {
-    let cluster_start_byte =
-        u64::try_from(cluster_index).unwrap()
-        * u64::from(header.sectors_per_cluster)
+    let cluster_start_sector = u64::from(header.first_data_sector())
+        + u64::try_from(cluster_index - 2).unwrap() * u64::from(header.sectors_per_cluster);
+    let cluster_start_byte = cluster_start_sector
         * u64::from(header.bytes_per_sector);
     reader.seek(SeekFrom::Start(cluster_start_byte))?;
     Ok(())
+}
+
+pub fn read_sector_into<R: Read + Seek>(reader: &mut R, header: &FatHeader, sector_index: u32, output: &mut Vec<u8>) -> Result<(), io::Error> {
+    let sector_start_byte = u64::from(header.bytes_per_sector) * u64::from(sector_index);
+    reader.seek(SeekFrom::Start(sector_start_byte))?;
+    read_next_sector_into(reader, header, output)
 }
 
 pub fn read_cluster_chain_into<R: Read + Seek>(reader: &mut R, header: &FatHeader, fat: &AllocationTable, first_cluster_index: u32, output: &mut Vec<u8>) -> Result<(), io::Error> {
@@ -287,4 +309,82 @@ pub fn read_cluster_chain_into<R: Read + Seek>(reader: &mut R, header: &FatHeade
     }
 
     Ok(())
+}
+
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct Attributes : u8 {
+        const READ_ONLY = 0b0000_0001;
+        const HIDDEN = 0b0000_0010;
+        const SYSTEM = 0b0000_0100;
+        const VOLUME_LABEL = 0b0000_1000;
+        const SUBDIRECTORY = 0b0001_0000;
+        const ARCHIVE = 0b0010_0000;
+        const DEVICE = 0b0100_0000;
+        const RESERVED = 0b1000_0000;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DirectoryEntry {
+    pub file_name: DisplayBytes<8>,
+    pub extension: DisplayBytes<3>,
+    pub attributes: Attributes,
+    pub reserved: u8,
+    pub create_time_10ms: u8,
+    pub create_time_h_m_2s: u16,
+    pub create_date: u16,
+    pub access_date: u16,
+    pub reserved2: Option<u16>, // FAT32: top half of first cluster number
+    pub modification_time_h_m_2s: u16,
+    pub modification_date: u16,
+    pub first_cluster_number: u32, // u16 (bottom half on FAT32)
+    pub file_size_bytes: u32,
+}
+impl DirectoryEntry {
+    pub fn read<R: Read>(reader: &mut R, variant: FatVariant) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 32];
+        reader.read_exact(&mut buf)?;
+
+        let file_name = buf[0..8].try_into().unwrap();
+        let extension = buf[8..11].try_into().unwrap();
+        let attributes = Attributes::from_bits_retain(buf[11]);
+        let reserved = buf[12];
+        let create_time_10ms = buf[13];
+        let create_time_h_m_2s = u16::from_le_bytes(buf[14..16].try_into().unwrap());
+        let create_date = u16::from_le_bytes(buf[16..18].try_into().unwrap());
+        let access_date = u16::from_le_bytes(buf[18..20].try_into().unwrap());
+        let reserved2 = if variant == FatVariant::Fat32 {
+            None
+        } else {
+            Some(u16::from_le_bytes(buf[20..22].try_into().unwrap()))
+        };
+        let modification_time_h_m_2s = u16::from_le_bytes(buf[22..24].try_into().unwrap());
+        let modification_date = u16::from_le_bytes(buf[24..26].try_into().unwrap());
+        let first_cluster_number = if variant == FatVariant::Fat32 {
+            let bottom_half: u32 = u16::from_le_bytes(buf[26..28].try_into().unwrap()).into();
+            let top_half: u32 = u16::from_le_bytes(buf[20..22].try_into().unwrap()).into();
+            (top_half << 16) | bottom_half
+        } else {
+            u16::from_le_bytes(buf[26..28].try_into().unwrap()).into()
+        };
+        let file_size_bytes = u32::from_le_bytes(buf[28..32].try_into().unwrap());
+
+        Ok(Self {
+            file_name,
+            extension,
+            attributes,
+            reserved,
+            create_time_10ms,
+            create_time_h_m_2s,
+            create_date,
+            access_date,
+            reserved2,
+            modification_time_h_m_2s,
+            modification_date,
+            first_cluster_number,
+            file_size_bytes,
+        })
+    }
 }
