@@ -98,8 +98,11 @@ fn main() {
             } else {
                 match fat_header.root_directory_location {
                     RootDirectoryLocation::Sector(sector) => {
-                        expandms::fat::read_sector_into(&mut input_file, &fat_header, sector, &mut dir_data)
-                            .expect("failed to read sector");
+                        let sector_count = u32::from(fat_header.max_root_dir_entries) * 32 / u32::from(fat_header.bytes_per_sector);
+                        for i in 0..sector_count {
+                            expandms::fat::read_sector_into(&mut input_file, &fat_header, sector + i, &mut dir_data)
+                                .expect("failed to read sector");
+                        }
                     },
                     RootDirectoryLocation::Cluster(cluster) => {
                         expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, cluster, &mut dir_data)
