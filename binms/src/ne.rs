@@ -3,7 +3,8 @@
 //! The NE format was introduced with Windows 1.0 and supplanted by PE in Windows NT 3.1 and Windows
 //! 95.
 
-use std::{collections::BTreeMap, io::{self, Read, Seek, SeekFrom}};
+use std::collections::BTreeMap;
+use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
 
@@ -47,11 +48,11 @@ pub struct Executable {
 
     pub segment_table: Vec<SegmentTableEntry>, // [SegmentTableEntry; segment_table_entries]
     pub resource_table: ResourceTable,
-    pub resident_name_table: Vec<ResidentNameTableEntry>,
-    pub module_reference_table: Vec<ModuleReferenceTableEntry>, // [ModuleReferenceTableEntry; module_reference_table_entries]
-    pub imported_names_table: Vec<ImportedNamesTableEntry>,
+    pub resident_name_table: Vec<NameTableEntry>,
+    pub module_reference_offsets: Vec<u16>, // [u16; module_reference_table_entries]
+    pub imported_names: Vec<Vec<u8>>,
     pub entry_table: Vec<EntryTableEntry>,
-    pub non_resident_name_table: Vec<NonResidentNameTableEntry>,
+    pub non_resident_name_table: Vec<NameTableEntry>,
 }
 impl Executable {
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
@@ -110,6 +111,37 @@ impl Executable {
 
         // read the resource table
         reader.seek(SeekFrom::Start(ne_header_offset + resource_table_offset.into()))?;
+        let resource_table = ResourceTable::read(reader, resource_entries)?;
+
+        // read the resident-name table
+        reader.seek(SeekFrom::Start(ne_header_offset + resident_name_table_offset.into()))?;
+        let resident_name_table = NameTableEntry::read_table(reader)?;
+
+        // read the module-reference table
+        reader.seek(SeekFrom::Start(ne_header_offset + module_reference_table_offset.into()));
+        let mut module_reference_offsets = Vec::with_capacity(module_reference_table_entries.into());
+        for _ in 0..module_reference_table_entries {
+            let mut buf = [0u8; 2];
+            reader.read_exact(&mut buf)?;
+            let offset = u16::from_le_bytes(buf);
+            module_reference_offsets.push(offset);
+        }
+
+        // read the module-reference table
+        let mut imported_names = Vec::new();
+        reader.seek(SeekFrom::Start(ne_header_offset + imported_names_table_offset.into()));
+        loop {
+            let mut length_buf = [0u8];
+            reader.read_exact(&mut length_buf)?;
+            if length_buf[0] == 0 {
+                // end of table
+                break;
+            }
+
+            let mut buf = vec![0u8; length_buf[0].into()];
+            reader.read_exact(&mut buf)?;
+            imported_names.push(buf);
+        }
 
         Ok(Self {
             mz,
@@ -125,11 +157,11 @@ impl Executable {
             logical_sector_alignment_shift_count,
             executable_type,
             reserved,
-            segment_table: todo!(),
-            resource_table: todo!(),
-            resident_name_table: todo!(),
-            module_reference_table: todo!(),
-            imported_names_table: todo!(),
+            segment_table,
+            resource_table,
+            resident_name_table,
+            module_reference_offsets,
+            imported_names,
             entry_table: todo!(),
             non_resident_name_table: todo!(),
         })
@@ -284,7 +316,7 @@ impl ResourceTable {
                 resource_entries -= count;
             }
         }
-        
+
         Ok(Self {
             alignment_shift_count,
             id_to_type,
@@ -308,6 +340,39 @@ pub struct Resource {
     pub resource_id: ResourceId,
     pub reserved: u32,
     pub data: Vec<u8>, // [u8; resource_length],
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NameTableEntry {
+    // length: u8,
+    pub name: Vec<u8>, // [u8; length],
+    pub ordinal_number: u16,
+}
+impl NameTableEntry {
+    pub fn read_table<R: Read>(reader: &mut R) -> Result<Vec<Self>, io::Error> {
+        let mut table = Vec::new();
+        loop {
+            let mut length_buf = [0u8];
+            reader.read_exact(&mut length_buf)?;
+            if length_buf[0] == 0 {
+                // end of table
+                break;
+            }
+
+            let mut name = vec![0u8; length_buf[0].into()];
+            reader.read_exact(&mut name)?;
+
+            let mut ordinal_buf = [0u8; 2];
+            reader.read_exact(&mut ordinal_buf)?;
+            let ordinal_number = u16::from_le_bytes(ordinal_buf);
+
+            table.push(Self {
+                name,
+                ordinal_number,
+            })
+        }
+        Ok(table)
+    }
 }
 
 
