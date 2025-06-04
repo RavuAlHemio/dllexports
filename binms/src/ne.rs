@@ -51,7 +51,7 @@ pub struct Executable {
     pub resident_name_table: Vec<NameTableEntry>,
     pub module_reference_offsets: Vec<u16>, // [u16; module_reference_table_entries]
     pub imported_names: Vec<Vec<u8>>,
-    pub entry_table: Vec<EntryTableEntry>,
+    pub entry_table: Vec<EntryBundle>,
     pub non_resident_name_table: Vec<NameTableEntry>,
 }
 impl Executable {
@@ -102,7 +102,7 @@ impl Executable {
         let reserved = header_buf[53..62].try_into().unwrap();
 
         // read the segment table
-        reader.seek(SeekFrom::Start(ne_header_offset + segment_table_offset.into()))?;
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(segment_table_offset)))?;
         let mut segment_table = Vec::with_capacity(segment_table_entries.into());
         for _ in 0..segment_table_entries {
             let entry = SegmentTableEntry::read(reader)?;
@@ -110,15 +110,15 @@ impl Executable {
         }
 
         // read the resource table
-        reader.seek(SeekFrom::Start(ne_header_offset + resource_table_offset.into()))?;
-        let resource_table = ResourceTable::read(reader, resource_entries)?;
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resource_table_offset)))?;
+        let resource_table = ResourceTable::read(reader)?;
 
         // read the resident-name table
-        reader.seek(SeekFrom::Start(ne_header_offset + resident_name_table_offset.into()))?;
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resident_name_table_offset)))?;
         let resident_name_table = NameTableEntry::read_table(reader)?;
 
         // read the module-reference table
-        reader.seek(SeekFrom::Start(ne_header_offset + module_reference_table_offset.into()));
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(module_reference_table_offset)))?;
         let mut module_reference_offsets = Vec::with_capacity(module_reference_table_entries.into());
         for _ in 0..module_reference_table_entries {
             let mut buf = [0u8; 2];
@@ -127,9 +127,9 @@ impl Executable {
             module_reference_offsets.push(offset);
         }
 
-        // read the module-reference table
+        // read the imported-name table
         let mut imported_names = Vec::new();
-        reader.seek(SeekFrom::Start(ne_header_offset + imported_names_table_offset.into()));
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(imported_names_table_offset)))?;
         loop {
             let mut length_buf = [0u8];
             reader.read_exact(&mut length_buf)?;
@@ -142,6 +142,72 @@ impl Executable {
             reader.read_exact(&mut buf)?;
             imported_names.push(buf);
         }
+
+        // read the entry table
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(entry_table_offset)))?;
+        let mut entry_table = Vec::new();
+        loop {
+            let mut buf1 = [0u8];
+
+            reader.read_exact(&mut buf1)?;
+            let entry_count = buf1[0];
+            if entry_count == 0 {
+                // no more bundles
+                break;
+            }
+
+            reader.read_exact(&mut buf1)?;
+            let segment_indicator = buf1[0];
+            let bundle = match segment_indicator {
+                0x00 => {
+                    // unused entries
+                    EntryBundle::Unused { entry_count }
+                },
+                0xFF => {
+                    // moveable segment
+                    let mut entries = Vec::with_capacity(entry_count.into());
+                    for _ in 0..entry_count {
+                        let mut entry_buf = [0u8; 6];
+                        reader.read_exact(&mut entry_buf)?;
+
+                        let flags = SegmentEntryFlags::from_bits_retain(entry_buf[0]);
+                        let int_3fh = entry_buf[1..3].try_into().unwrap();
+                        let segment_number = entry_buf[3];
+                        let entry_point_offset = u16::from_le_bytes(entry_buf[4..6].try_into().unwrap());
+
+                        entries.push(MoveableSegmentEntry {
+                            flags,
+                            int_3fh,
+                            segment_number,
+                            entry_point_offset,
+                        });
+                    }
+                    EntryBundle::Moveable { entries }
+                },
+                other => {
+                    // fixed segment
+                    let mut entries = Vec::with_capacity(entry_count.into());
+                    for _ in 0..entry_count {
+                        let mut entry_buf = [0u8; 3];
+                        reader.read_exact(&mut entry_buf)?;
+
+                        let flags = SegmentEntryFlags::from_bits_retain(entry_buf[0]);
+                        let entry_point_offset = u16::from_le_bytes(entry_buf[1..3].try_into().unwrap());
+
+                        entries.push(FixedSegmentEntry {
+                            flags,
+                            entry_point_offset,
+                        });
+                    }
+                    EntryBundle::Fixed { segment_number: other, entries }
+                },
+            };
+            entry_table.push(bundle);
+        }
+
+        // read the nonresident-name table
+        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(non_resident_name_table_offset)))?;
+        let non_resident_name_table = NameTableEntry::read_table(reader)?;
 
         Ok(Self {
             mz,
@@ -162,8 +228,8 @@ impl Executable {
             resident_name_table,
             module_reference_offsets,
             imported_names,
-            entry_table: todo!(),
-            non_resident_name_table: todo!(),
+            entry_table,
+            non_resident_name_table,
         })
     }
 }
@@ -255,7 +321,7 @@ pub struct ResourceTable {
     pub id_to_type: BTreeMap<ResourceId, ResourceType>,
 }
 impl ResourceTable {
-    pub fn read<R: Read + Seek>(reader: &mut R, mut resource_entries: u16) -> Result<Self, io::Error> {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let resource_table_pos = reader.seek(SeekFrom::Current(0))?;
 
         let mut buf = [0u8; 2];
@@ -263,9 +329,13 @@ impl ResourceTable {
         let alignment_shift_count = u16::from_le_bytes(buf);
 
         let mut id_to_type = BTreeMap::new();
-        while resource_entries > 0 {
+        loop {
             reader.read_exact(&mut buf)?;
             let value = u16::from_le_bytes(buf);
+            if value == 0 {
+                // that was it
+                break;
+            }
             let type_id = ResourceId::from_reader_and_value(reader, value, resource_table_pos)?;
 
             let mut buf2 = [0u8; 6];
@@ -279,21 +349,24 @@ impl ResourceTable {
                 reader.read_exact(&mut resource_buf)?;
 
                 let resource_offset_units = u16::from_le_bytes(resource_buf[0..2].try_into().unwrap());
-                let resource_length_bytes = u16::from_le_bytes(resource_buf[2..4].try_into().unwrap());
+                let resource_length_units = u16::from_le_bytes(resource_buf[2..4].try_into().unwrap());
                 let flags = ResourceFlags::from_bits_retain(u16::from_le_bytes(resource_buf[4..6].try_into().unwrap()));
                 let resource_id_value = u16::from_le_bytes(resource_buf[6..8].try_into().unwrap());
                 let reserved = u32::from_le_bytes(resource_buf[8..12].try_into().unwrap());
 
                 let file_offset_bytes = u64::from(resource_offset_units) * (1 << alignment_shift_count);
+                let resource_length_bytes = usize::from(resource_length_units) * (1 << alignment_shift_count);
                 let resource_id = ResourceId::from_reader_and_value(reader, resource_id_value, resource_table_pos)?;
 
+                let location = reader.seek(SeekFrom::Current(0))?;
                 reader.seek(SeekFrom::Start(file_offset_bytes))?;
                 let mut data = vec![0u8; resource_length_bytes.into()];
                 reader.read_exact(&mut data)?;
+                reader.seek(SeekFrom::Start(location))?;
 
                 resources.insert(resource_id.clone(), Resource {
                     resource_offset_units,
-                    resource_length_bytes,
+                    resource_length_units,
                     flags,
                     resource_id,
                     reserved,
@@ -309,12 +382,6 @@ impl ResourceTable {
                     resources,
                 },
             );
-
-            if resource_entries < count {
-                resource_entries = 0;
-            } else {
-                resource_entries -= count;
-            }
         }
 
         Ok(Self {
@@ -335,7 +402,7 @@ pub struct ResourceType {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Resource {
     pub resource_offset_units: u16, // (relative to beginning of file, units of (1 << alignment_shift_count))
-    pub resource_length_bytes: u16,
+    pub resource_length_units: u16, // (units of (1 << alignment_shift_count))
     pub flags: ResourceFlags,
     pub resource_id: ResourceId,
     pub reserved: u32,
@@ -375,10 +442,44 @@ impl NameTableEntry {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EntryBundle {
+    // number_of_entries: u8,
+    // segment_indicator: u8, (discriminant)
+
+    Unused {
+        // segment_indicator == 0x00
+        entry_count: u8,
+    },
+    Fixed {
+        // segment_indicator in 0x01..=0xFE
+        segment_number: u8,
+        entries: Vec<FixedSegmentEntry>,
+    },
+    Moveable {
+        // segment_indicator == 0xFF
+        entries: Vec<MoveableSegmentEntry>,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FixedSegmentEntry {
+    pub flags: SegmentEntryFlags, // u8
+    pub entry_point_offset: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct MoveableSegmentEntry {
+    pub flags: SegmentEntryFlags, // u8
+    pub int_3fh: [u8; 2],
+    pub segment_number: u8,
+    pub entry_point_offset: u16,
+}
+
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct ExeFlags: u16 {
+    pub struct ExeFlags : u16 {
         const SINGLE_DATA = 0x0001;
         const MULTIPLE_DATA = 0x0002;
         const LINK_ERRORS = 0x2000;
@@ -386,7 +487,7 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct SegmentFlags: u16 {
+    pub struct SegmentFlags : u16 {
         const DATA = 0x0001;
         const MOVEABLE = 0x0010;
         const PRELOAD = 0x0040;
@@ -395,10 +496,16 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct ResourceFlags: u16 {
+    pub struct ResourceFlags : u16 {
         const MOVEABLE = 0x0010;
         const PURE = 0x0020;
         const PRELOAD = 0x0040;
+    }
+
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct SegmentEntryFlags : u8 {
+        const EXPORTED = 0x01;
+        const SHARED_DATA = 0x02;
     }
 }
 

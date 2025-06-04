@@ -12,6 +12,8 @@ enum ProgMode {
     FatHeader(InputFileOnlyArgs),
     FatDirectory(InputFileAndOptIndexArgs),
     FatData(InputFileAndIndexArgs),
+    MzHeader(InputFileOnlyArgs),
+    NeHeader(InputFileOnlyArgs),
 }
 
 #[derive(Parser)]
@@ -147,6 +149,22 @@ fn main() {
             expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, args.index, &mut data)
                 .expect("failed to read cluster chain");
             println!("{:?}", data);
+        },
+        ProgMode::MzHeader(args) => {
+            let mut input_file = File::open(&args.input_file)
+                .expect("failed to open input file");
+
+            let mz = binms::mz::Executable::read(&mut input_file)
+                .expect("failed to read MZ header");
+            println!("{:#?}", mz);
+        },
+        ProgMode::NeHeader(args) => {
+            let mut input_file = File::open(&args.input_file)
+                .expect("failed to open input file");
+
+            let ne = binms::ne::Executable::read(&mut input_file)
+                .expect("failed to read NE header");
+            println!("{:#?}", ne);
         },
     }
 }
