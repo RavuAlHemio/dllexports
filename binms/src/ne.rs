@@ -110,8 +110,12 @@ impl Executable {
         }
 
         // read the resource table
-        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resource_table_offset)))?;
-        let resource_table = ResourceTable::read(reader)?;
+        let resource_table = if resource_table_offset != resident_name_table_offset {
+            reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resource_table_offset)))?;
+            ResourceTable::read(reader)?
+        } else {
+            ResourceTable::default()
+        };
 
         // read the resident-name table
         reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resident_name_table_offset)))?;
@@ -315,7 +319,7 @@ impl ResourceId {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ResourceTable {
     pub alignment_shift_count: u16,
     pub id_to_type: BTreeMap<ResourceId, ResourceType>,
