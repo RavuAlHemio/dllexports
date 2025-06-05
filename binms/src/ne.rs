@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
+use display_bytes::DisplayBytesVec;
+use from_to_repr::{FromToRepr, from_to_other};
 
 
 const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
@@ -49,8 +51,6 @@ pub struct Executable {
     pub segment_table: Vec<SegmentTableEntry>, // [SegmentTableEntry; segment_table_entries]
     pub resource_table: ResourceTable,
     pub resident_name_table: Vec<NameTableEntry>,
-    pub module_reference_offsets: Vec<u16>, // [u16; module_reference_table_entries]
-    pub imported_names: Vec<Vec<u8>>,
     pub entry_table: Vec<EntryBundle>,
     pub non_resident_name_table: Vec<NameTableEntry>,
 }
@@ -58,6 +58,11 @@ impl Executable {
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         // read the MZ executable
         let mz = crate::mz::Executable::read(reader)?;
+
+        // prerequisite for an NE executable: MZ relocation data at 0x0040
+        if mz.relocation_table_offset != 0x0040 {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
 
         // get the offset to the segmented executable header and seek there
         reader.seek(SeekFrom::Start(SEGMENTED_HEADER_OFFSET_OFFSET))?;
@@ -88,7 +93,7 @@ impl Executable {
         let ss_sp = SegmentAndOffset::try_from_slice(&header_buf[22..26]).unwrap();
         let segment_table_entries = u16::from_le_bytes(header_buf[26..28].try_into().unwrap());
         let module_reference_table_entries = u16::from_le_bytes(header_buf[28..30].try_into().unwrap());
-        let non_resident_name_table_bytes = u16::from_le_bytes(header_buf[30..32].try_into().unwrap());
+        let non_resident_name_table_entries = u16::from_le_bytes(header_buf[30..32].try_into().unwrap());
         let segment_table_offset = u16::from_le_bytes(header_buf[32..34].try_into().unwrap());
         let resource_table_offset = u16::from_le_bytes(header_buf[34..36].try_into().unwrap());
         let resident_name_table_offset = u16::from_le_bytes(header_buf[36..38].try_into().unwrap());
@@ -101,11 +106,19 @@ impl Executable {
         let executable_type = header_buf[52];
         let reserved = header_buf[53..62].try_into().unwrap();
 
+        let module_reference_table_absolute_offset = ne_header_offset + u64::from(module_reference_table_offset);
+        let imported_names_table_absolute_offset = ne_header_offset + u64::from(imported_names_table_offset);
+
         // read the segment table
         reader.seek(SeekFrom::Start(ne_header_offset + u64::from(segment_table_offset)))?;
         let mut segment_table = Vec::with_capacity(segment_table_entries.into());
         for _ in 0..segment_table_entries {
-            let entry = SegmentTableEntry::read(reader)?;
+            let entry = SegmentTableEntry::read(
+                reader,
+                logical_sector_alignment_shift_count,
+                module_reference_table_absolute_offset,
+                imported_names_table_absolute_offset,
+            )?;
             segment_table.push(entry);
         }
 
@@ -119,33 +132,7 @@ impl Executable {
 
         // read the resident-name table
         reader.seek(SeekFrom::Start(ne_header_offset + u64::from(resident_name_table_offset)))?;
-        let resident_name_table = NameTableEntry::read_table(reader)?;
-
-        // read the module-reference table
-        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(module_reference_table_offset)))?;
-        let mut module_reference_offsets = Vec::with_capacity(module_reference_table_entries.into());
-        for _ in 0..module_reference_table_entries {
-            let mut buf = [0u8; 2];
-            reader.read_exact(&mut buf)?;
-            let offset = u16::from_le_bytes(buf);
-            module_reference_offsets.push(offset);
-        }
-
-        // read the imported-name table
-        let mut imported_names = Vec::new();
-        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(imported_names_table_offset)))?;
-        loop {
-            let mut length_buf = [0u8];
-            reader.read_exact(&mut length_buf)?;
-            if length_buf[0] == 0 {
-                // end of table
-                break;
-            }
-
-            let mut buf = vec![0u8; length_buf[0].into()];
-            reader.read_exact(&mut buf)?;
-            imported_names.push(buf);
-        }
+        let resident_name_table = NameTableEntry::read_table(reader, None)?;
 
         // read the entry table
         reader.seek(SeekFrom::Start(ne_header_offset + u64::from(entry_table_offset)))?;
@@ -209,9 +196,9 @@ impl Executable {
             entry_table.push(bundle);
         }
 
-        // read the nonresident-name table
-        reader.seek(SeekFrom::Start(ne_header_offset + u64::from(non_resident_name_table_offset)))?;
-        let non_resident_name_table = NameTableEntry::read_table(reader)?;
+        // read the nonresident-name table (absolute offset!)
+        reader.seek(SeekFrom::Start(non_resident_name_table_offset.into()))?;
+        let non_resident_name_table = NameTableEntry::read_table(reader, Some(non_resident_name_table_entries.into()))?;
 
         Ok(Self {
             mz,
@@ -230,8 +217,6 @@ impl Executable {
             segment_table,
             resource_table,
             resident_name_table,
-            module_reference_offsets,
-            imported_names,
             entry_table,
             non_resident_name_table,
         })
@@ -259,15 +244,21 @@ impl SegmentAndOffset {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SegmentTableEntry {
     pub logical_sector_offset: u16,
     pub segment_length: u16,
     pub flags: SegmentFlags, // u16
     pub min_allocation_size_bytes: u16,
+    pub relocation_entries: Vec<RelocationEntry>,
 }
 impl SegmentTableEntry {
-    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+    pub fn read<R: Read + Seek>(
+        reader: &mut R,
+        logical_sector_alignment_shift_count: u16,
+        module_reference_table_absolute_offset: u64,
+        imported_names_table_absolute_offset: u64,
+    ) -> Result<Self, io::Error> {
         let mut buf = [0u8; 8];
         reader.read_exact(&mut buf)?;
 
@@ -276,19 +267,206 @@ impl SegmentTableEntry {
         let flags = SegmentFlags::from_bits_retain(u16::from_le_bytes(buf[4..6].try_into().unwrap()));
         let min_allocation_size_bytes = u16::from_le_bytes(buf[6..8].try_into().unwrap());
 
+        let relocation_entries = if flags.contains(SegmentFlags::HAS_RELOCATION_INFO) {
+            let segment_table_pos = reader.seek(SeekFrom::Current(0))?;
+            let sector_offset = u64::from(logical_sector_offset) * (1 << logical_sector_alignment_shift_count);
+            reader.seek(SeekFrom::Start(sector_offset + u64::from(segment_length)))?;
+
+            let mut buf2 = [0u8; 2];
+            reader.read_exact(&mut buf2)?;
+            let record_number = u16::from_le_bytes(buf2);
+
+            let mut records = Vec::with_capacity(record_number.into());
+            for _ in 0..record_number {
+                let mut record_buf = [0u8; 8];
+                reader.read_exact(&mut record_buf)?;
+
+                let source_type = RelocationEntrySourceType::from_base_type(record_buf[0]);
+                let target_and_flags = record_buf[1];
+                let source_chain_offset = u16::from_le_bytes(record_buf[2..4].try_into().unwrap());
+
+                let target_type = RelocationEntryTargetType::try_from_repr(target_and_flags & 0b0000_0111).unwrap();
+                let flags = RelocationEntryFlags::from_bits_retain(target_and_flags & 0b1111_1000);
+
+                let target = match target_type {
+                    RelocationEntryTargetType::InternalReference => {
+                        let segment_number = record_buf[4];
+                        let zero = record_buf[5];
+                        if segment_number == 0xFF {
+                            let entry_table_index = u16::from_le_bytes(record_buf[6..8].try_into().unwrap());
+                            RelocationTarget::InternalReferenceToMovableSegment {
+                                zero,
+                                entry_table_index,
+                            }
+                        } else {
+                            let offset_into_segment = u16::from_le_bytes(record_buf[6..8].try_into().unwrap());
+                            RelocationTarget::InternalReferenceToFixedSegment {
+                                segment_number,
+                                zero,
+                                offset_into_segment,
+                            }
+                        }
+                    },
+                    RelocationEntryTargetType::ImportName => {
+                        let module_reference_table_index = u16::from_le_bytes(record_buf[4..6].try_into().unwrap()) - 1;
+                        let procedure_imported_names_table_offset = u16::from_le_bytes(record_buf[6..8].try_into().unwrap());
+
+                        // remember where we are
+                        let position = reader.seek(SeekFrom::Current(0))?;
+
+                        // to get the module name, we have to follow two references:
+                        // &imported_names_table + module_reference_table[module_reference_table_index]
+                        // the procedure name is more straightforward:
+                        // &imported_names_table + procedure_imported_names_table_offset
+
+                        // go to module reference table entry
+                        let module_reference_table_location =
+                            module_reference_table_absolute_offset
+                            + u64::from(module_reference_table_index) * 2;
+                        reader.seek(SeekFrom::Start(module_reference_table_location))?;
+                        let mut offset_buf = [0u8; 2];
+                        reader.read_exact(&mut offset_buf)?;
+                        let module_name_offset = u16::from_le_bytes(offset_buf);
+
+                        // we will need this soon
+                        let mut len_buf = [0u8];
+
+                        // read that entry in the imported-names table to get the module name
+                        reader.seek(SeekFrom::Start(imported_names_table_absolute_offset + u64::from(module_name_offset)))?;
+                        reader.read_exact(&mut len_buf)?;
+                        let mut module_name_buf = vec![0u8; len_buf[0].into()];
+                        reader.read_exact(&mut module_name_buf)?;
+
+                        // go to the procedure name offset in the import-names table and read it
+                        reader.seek(SeekFrom::Start(imported_names_table_absolute_offset + u64::from(procedure_imported_names_table_offset)))?;
+                        reader.read_exact(&mut len_buf)?;
+                        let mut procedure_name_buf = vec![0u8; len_buf[0].into()];
+                        reader.read_exact(&mut procedure_name_buf)?;
+
+                        // seek back
+                        reader.seek(SeekFrom::Start(position))?;
+
+                        RelocationTarget::ImportName {
+                            module_name: module_name_buf.into(),
+                            procedure_name: procedure_name_buf.into(),
+                        }
+                    },
+                    RelocationEntryTargetType::ImportOrdinal => {
+                        let module_reference_table_index = u16::from_le_bytes(record_buf[4..6].try_into().unwrap()) - 1;
+                        let procedure_ordinal = u16::from_le_bytes(record_buf[6..8].try_into().unwrap());
+
+                        let position = reader.seek(SeekFrom::Current(0))?;
+
+                        let module_reference_table_location =
+                            module_reference_table_absolute_offset
+                            + u64::from(module_reference_table_index) * 2;
+                        reader.seek(SeekFrom::Start(module_reference_table_location))?;
+                        let mut offset_buf = [0u8; 2];
+                        reader.read_exact(&mut offset_buf)?;
+                        let module_name_offset = u16::from_le_bytes(offset_buf);
+
+                        reader.seek(SeekFrom::Start(imported_names_table_absolute_offset + u64::from(module_name_offset)))?;
+                        let mut len_buf = [0u8];
+                        reader.read_exact(&mut len_buf)?;
+                        let mut module_name_buf = vec![0u8; len_buf[0].into()];
+                        reader.read_exact(&mut module_name_buf)?;
+
+                        reader.seek(SeekFrom::Start(position))?;
+
+                        RelocationTarget::ImportOrdinal {
+                            module_name: module_name_buf.into(),
+                            procedure_ordinal,
+                        }
+                    },
+                    RelocationEntryTargetType::OperatingSystemFixup => {
+                        let fixup_type = FixupType::from_base_type(u16::from_le_bytes(record_buf[4..6].try_into().unwrap()));
+                        let zero = u16::from_le_bytes(record_buf[4..6].try_into().unwrap());
+                        RelocationTarget::OperatingSystemFixup {
+                            fixup_type,
+                            zero,
+                        }
+                    },
+                };
+
+                records.push(RelocationEntry {
+                    source_type,
+                    flags,
+                    source_chain_offset,
+                    target,
+                });
+            }
+
+            reader.seek(SeekFrom::Start(segment_table_pos))?;
+
+            records
+        } else {
+            Vec::with_capacity(0)
+        };
+
         Ok(Self {
             logical_sector_offset,
             segment_length,
             flags,
             min_allocation_size_bytes,
+            relocation_entries,
         })
     }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RelocationEntry {
+    pub source_type: RelocationEntrySourceType, // u8
+    // target_type: RelocationEntryTargetType, // lower 3 bits of u8
+    pub flags: RelocationEntryFlags, // upper 5 bits of u8
+    pub source_chain_offset: u16,
+    pub target: RelocationTarget, // all variants equivalent to [u8; 4]
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RelocationTarget {
+    InternalReferenceToFixedSegment {
+        segment_number: u8, // except 0xFF
+        zero: u8,
+        offset_into_segment: u16,
+    },
+    InternalReferenceToMovableSegment {
+        // segment_number == 0xFF: u8,
+        zero: u8,
+        entry_table_index: u16,
+    },
+    ImportName {
+        // module_reference_table_index: u16,
+        // procedure_imported_names_table_offset: u16,
+        module_name: DisplayBytesVec, // double-dereferenced
+        procedure_name: DisplayBytesVec, // dereferenced
+    },
+    ImportOrdinal {
+        // module_reference_table_index: u16,
+        module_name: DisplayBytesVec, // double-dereferenced
+        procedure_ordinal: u16,
+    },
+    OperatingSystemFixup {
+        fixup_type: FixupType, // u16
+        zero: u16,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+#[from_to_other(base_type = u16, derive_compare = "as_int")]
+pub enum FixupType {
+    FiarqqFjarqq = 0x0001,
+    FisrqqFjsrqq = 0x0002,
+    FicrqqFjcrqq = 0x0003,
+    Fierqq = 0x0004,
+    Fidrqq = 0x0005,
+    Fiwrqq = 0x0006,
+    Other(u16)
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ResourceId {
     Numbered(u16),
-    Named(Vec<u8>),
+    Named(DisplayBytesVec),
 }
 impl ResourceId {
     pub fn from_reader_and_value<R: Read + Seek>(reader: &mut R, value: u16, resource_table_pos: u64) -> Result<Self, io::Error> {
@@ -311,7 +489,7 @@ impl ResourceId {
             // go back to where we were
             reader.seek(SeekFrom::Start(return_here_pos))?;
 
-            Ok(ResourceId::Named(string))
+            Ok(ResourceId::Named(string.into()))
         } else {
             // number
             Ok(ResourceId::Numbered(value))
@@ -335,12 +513,12 @@ impl ResourceTable {
         let mut id_to_type = BTreeMap::new();
         loop {
             reader.read_exact(&mut buf)?;
-            let value = u16::from_le_bytes(buf);
-            if value == 0 {
+            let type_id_value = u16::from_le_bytes(buf);
+            if type_id_value == 0 {
                 // that was it
                 break;
             }
-            let type_id = ResourceId::from_reader_and_value(reader, value, resource_table_pos)?;
+            let type_id = ResourceId::from_reader_and_value(reader, type_id_value, resource_table_pos)?;
 
             let mut buf2 = [0u8; 6];
             reader.read_exact(&mut buf2)?;
@@ -374,7 +552,7 @@ impl ResourceTable {
                     flags,
                     resource_id,
                     reserved,
-                    data,
+                    data: data.into(),
                 });
             }
 
@@ -410,19 +588,26 @@ pub struct Resource {
     pub flags: ResourceFlags,
     pub resource_id: ResourceId,
     pub reserved: u32,
-    pub data: Vec<u8>, // [u8; resource_length],
+    pub data: DisplayBytesVec, // [u8; resource_length],
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NameTableEntry {
     // length: u8,
-    pub name: Vec<u8>, // [u8; length],
+    pub name: DisplayBytesVec, // [u8; length],
     pub ordinal_number: u16,
 }
 impl NameTableEntry {
-    pub fn read_table<R: Read>(reader: &mut R) -> Result<Vec<Self>, io::Error> {
+    pub fn read_table<R: Read>(reader: &mut R, max_entries: Option<usize>) -> Result<Vec<Self>, io::Error> {
         let mut table = Vec::new();
         loop {
+            if let Some(me) = max_entries {
+                if table.len() >= me {
+                    // we have reached the maximum entry count
+                    break;
+                }
+            }
+
             let mut length_buf = [0u8];
             reader.read_exact(&mut length_buf)?;
             if length_buf[0] == 0 {
@@ -438,7 +623,7 @@ impl NameTableEntry {
             let ordinal_number = u16::from_le_bytes(ordinal_buf);
 
             table.push(Self {
-                name,
+                name: name.into(),
                 ordinal_number,
             })
         }
@@ -511,10 +696,34 @@ bitflags! {
         const EXPORTED = 0x01;
         const SHARED_DATA = 0x02;
     }
+
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct RelocationEntryFlags : u8 {
+        const ADDITIVE = 0x04;
+    }
 }
 
 impl SegmentFlags {
     pub fn type_only(self) -> Self {
         Self::from_bits_retain(self.bits() & 0x0007)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[from_to_other(base_type = u8, derive_compare = "as_int")]
+pub enum RelocationEntrySourceType {
+    LowByte = 0x00,
+    Segment = 0x02,
+    FarAddress = 0x03,
+    Offset = 0x05,
+    Other(u8),
+}
+
+#[derive(Clone, Copy, Debug, Eq, FromToRepr, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum RelocationEntryTargetType {
+    InternalReference = 0x00,
+    ImportOrdinal = 0x01,
+    ImportName = 0x02,
+    OperatingSystemFixup = 0x03,
 }

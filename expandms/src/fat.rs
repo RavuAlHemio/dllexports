@@ -6,8 +6,7 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
-
-use crate::DisplayBytes;
+use display_bytes::DisplayBytes;
 
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

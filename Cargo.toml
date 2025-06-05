@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "binms",
+    "binms", "display-bytes",
     "dllexports",
     "expandms",
 ]
