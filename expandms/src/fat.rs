@@ -325,6 +325,8 @@ bitflags! {
     }
 }
 
+pub const DIRECTORY_ENTRY_SIZE_BYTES: usize = 16;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DirectoryEntry {
     pub file_name: DisplayBytes<8>,

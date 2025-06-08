@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 
@@ -20,7 +21,7 @@ pub struct PathSequence {
 ///
 /// This can be a compression-enabled archive format like PKZIP, an uncompressed archive format like
 /// TAR, or a file system image like FAT or ISO9660.
-pub trait MultiFileContainer {
+pub trait MultiFileContainer : fmt::Debug {
     fn list_files(&self) -> Result<Vec<PathBuf>, Error>;
     fn read_file(&self, file_path: &Path) -> Result<Vec<u8>, Error>;
 }
@@ -28,18 +29,19 @@ pub trait MultiFileContainer {
 /// A container file that contains a single file.
 ///
 /// Generally a single-file compression format such as gzip or KWAJ.
-pub trait SingleFileContainer {
+pub trait SingleFileContainer : fmt::Debug {
     fn read_file(&self) -> Result<Vec<u8>, Error>;
 }
 
 /// A file that exports symbols.
 ///
 /// This is generally a dynamic-link library format like NE or PE.
-pub trait SymbolExporter {
+pub trait SymbolExporter : fmt::Debug {
     fn read_symbols(&self) -> Result<Vec<Symbol>, Error>;
 }
 
 /// A file with its contents interpreted.
+#[derive(Debug)]
 pub enum IdentifiedFile {
     MultiFileContainer(Box<dyn MultiFileContainer>),
     SingleFileContainer(Box<dyn SingleFileContainer>),
@@ -58,4 +60,27 @@ pub enum Symbol {
 /// Sometimes things go wrong.
 #[derive(Debug)]
 pub enum Error {
+    Io(std::io::Error),
+    FileNotFound(PathBuf),
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e)
+                => write!(f, "I/O error: {}", e),
+            Self::FileNotFound(pb)
+                => write!(f, "file {:?} not found", pb),
+        }
+    }
+}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::FileNotFound(_) => None,
+        }
+    }
+}
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self { Self::Io(value) }
 }

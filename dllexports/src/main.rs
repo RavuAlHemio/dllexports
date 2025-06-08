@@ -18,6 +18,7 @@ enum ProgMode {
     FatData(InputFileAndIndexArgs),
     MzHeader(InputFileOnlyArgs),
     NeHeader(InputFileOnlyArgs),
+    Interpret(InputFileOnlyArgs),
 }
 
 #[derive(Parser)]
@@ -169,6 +170,13 @@ fn main() {
             let ne = binms::ne::Executable::read(&mut input_file)
                 .expect("failed to read NE header");
             println!("{:#?}", ne);
+        },
+        ProgMode::Interpret(args) => {
+            let input_bytes = std::fs::read(&args.input_file)
+                .expect("failed to read input file");
+            let interpreted = crate::formats::interpret_file(&input_bytes)
+                .expect("failed to interpret input file");
+            println!("{:#?}", interpreted);
         },
     }
 }

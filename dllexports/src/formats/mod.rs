@@ -1,4 +1,12 @@
-use crate::data_mgmt::{Error, IdentifiedFile};
+mod exe;
+mod fat;
+
+
+use std::io::Cursor;
+
+use binms::ne;
+
+use crate::{data_mgmt::{Error, IdentifiedFile}, formats::fat::FatFileSystem};
 
 
 fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
@@ -20,7 +28,13 @@ fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
     if &exe_type == b"PE" {
         todo!("parse PE");
     } else if &exe_type == b"NE" {
-        todo!("parse NE");
+        let mut cursor = Cursor::new(data);
+        let new_executable = match ne::Executable::read(&mut cursor) {
+            Ok(ne) => ne,
+            Err(e) => return Some(Err(Error::Io(e))),
+        };
+        todo!("collect exports from NE file");
+        //Some(Ok(IdentifiedFile::SymbolExporter(new_executable)))
     } else {
         None
     }
@@ -50,7 +64,8 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
             || data[0] == 0xE9
         ;
         if looks_like_fat {
-            todo!("FAT");
+            let thicc = FatFileSystem::new(data.to_owned())?;
+            return Ok(IdentifiedFile::MultiFileContainer(Box::new(thicc)));
         }
     }
 
