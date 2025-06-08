@@ -1,3 +1,7 @@
+mod data_mgmt;
+mod formats;
+
+
 use std::fs::File;
 use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
