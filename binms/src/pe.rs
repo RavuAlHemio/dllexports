@@ -1,0 +1,669 @@
+//! Portable Executable format.
+//!
+//! The PE format was introduced in Windows NT 3.1 and Windows 95; it is based on COFF and used by
+//! Windows to this day.
+
+use std::io::{self, Read, Seek, SeekFrom};
+
+use bitflags::bitflags;
+use from_to_repr::from_to_other;
+
+
+const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
+
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Executable {
+    pub mz: crate::mz::Executable,
+
+    // follow 32-bit offset at 0x3C to find the following structure:
+
+    // signature: b"PE",
+    pub machine_type: MachineType, // u16
+    pub section_count: u16,
+    pub time_date_stamp: u32,
+    pub symbol_table_pointer: u32, // COFF debug info, deprecated
+    pub symbol_table_count: u32, // COFF debug info, deprecated
+    pub optional_header_size: u16,
+    pub characteristics: Characteristics, // u16
+    pub optional_header: Option<OptionalHeader>,
+    pub section_table: Vec<SectionTableEntry>,
+}
+impl Executable {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        // read the MZ executable
+        let mz = crate::mz::Executable::read(reader)?;
+
+        // I *think* the relocation-data-at-0x0040 prerequisite is no longer true for PE
+
+        // get the offset to the segmented executable header and seek there
+        reader.seek(SeekFrom::Start(SEGMENTED_HEADER_OFFSET_OFFSET))?;
+        let mut offset_buf = [0u8; 4];
+        reader.read_exact(&mut offset_buf)?;
+        let pe_header_offset: u64 = u32::from_le_bytes(offset_buf).into();
+        reader.seek(SeekFrom::Start(pe_header_offset))?;
+
+        let mut signature_buf = [0u8; 2];
+        reader.read_exact(&mut signature_buf)?;
+        if &signature_buf != b"PE" {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
+        let mut header_buf = [0u8; 20];
+        reader.read_exact(&mut header_buf)?;
+
+        let machine_type = MachineType::from_base_type(u16::from_le_bytes(header_buf[0..2].try_into().unwrap()));
+        let section_count = u16::from_le_bytes(header_buf[2..4].try_into().unwrap());
+        let time_date_stamp = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
+        let symbol_table_pointer = u32::from_le_bytes(header_buf[8..12].try_into().unwrap());
+        let symbol_table_count = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
+        let optional_header_size = u16::from_le_bytes(header_buf[16..18].try_into().unwrap());
+        let characteristics = Characteristics::from_bits_retain(u16::from_le_bytes(header_buf[18..20].try_into().unwrap()));
+
+        let optional_header = OptionalHeader::read(reader, optional_header_size)?;
+
+        // seek past optional header
+        reader.seek(SeekFrom::Start(pe_header_offset + 22 + u64::from(optional_header_size)))?;
+
+        let mut section_table = Vec::with_capacity(section_count.into());
+        for _ in 0..section_count {
+            let entry = SectionTableEntry::read(reader)?;
+            section_table.push(entry);
+        }
+
+        Ok(Self {
+            mz,
+            machine_type,
+            section_count,
+            time_date_stamp,
+            symbol_table_pointer,
+            symbol_table_count,
+            optional_header_size,
+            characteristics,
+            optional_header,
+            section_table,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[from_to_other(base_type = u16, derive_compare = "as_int")]
+pub enum MachineType {
+    Unknown = 0x0000,
+    AlphaAxp = 0x0184,
+    Alpha64 = 0x0284,
+    MatsushitaAm33 = 0x01D3,
+    Amd64 = 0x8664,
+    Arm = 0x01C0,
+    Arm64 = 0xAA64,
+    ArmThumb2 = 0x01C4,
+    EfiByteCode = 0x0EBC,
+    I386 = 0x014C,
+    Itanium = 0x0200,
+    LoongArch32 = 0x6232,
+    LoongArch64 = 0x6264,
+    MitsubishiM32r = 0x9041,
+    Mips16 = 0x0266,
+    MipsWithFpu = 0x0366,
+    Mips16WithFpu = 0x0466,
+    PowerPc = 0x01F0,
+    PowerPcWithFpu = 0x01F1,
+    MipsR3kBigEndian = 0x0160,
+    MipsR3kLittleEndian = 0x0162,
+    MipsR4k = 0x0166,
+    MipsR10k = 0x0168,
+    RiscV32 = 0x5032,
+    RiscV64 = 0x5064,
+    RiscV128 = 0x5128,
+    HitachiSh3 = 0x01A2,
+    HitachiSh3Dsp = 0x01A3,
+    HitachiSh4 = 0x01A6,
+    HitachiSh5 = 0x01A8,
+    ArmThumb = 0x01C2,
+    WceMipsV2 = 0x0169,
+    Other(u16),
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct Characteristics : u16 {
+        /// Relocation data has been stripped; image must be loaded at its preferred address.
+        ///
+        /// Images only, Windows CE or NT only. Only happens by default for EXEs.
+        const RELOCS_STRIPPED = 0x0001;
+
+        /// Image is valid and can be run. Lack of this flag indicates a linker error.
+        const EXECUTABLE_IMAGE = 0x0002;
+
+        /// COFF line numbers have been stripped.
+        ///
+        /// This flag is deprecated because COFF debug information is deprecated.
+        const LINE_NUMS_STRIPPED = 0x0004;
+
+        /// COFF local symbols have been stripped.
+        ///
+        /// This flag is deprecated because COFF debug information is deprecated.
+        const LOCAL_SYMS_STRIPPED = 0x0008;
+
+        /// Aggressively trim working set.
+        ///
+        /// Deprecated since Windows 2000 (NT 5.0).
+        const AGGRESSIVE_WS_TRIM = 0x0010;
+
+        /// Application can handle addresses beyond 2GB.
+        ///
+        /// 32-bit applications can theoretically handle up to 4GB, but not if they process memory
+        /// addresses using signed integers.
+        const LARGE_ADDRESS_AWARE = 0x0020;
+
+        // 0x0040 reserved
+
+        /// Little-endian integers on a big-endian machine. Deprecated.
+        const BYTES_REVERSED_LO = 0x0080;
+
+        /// Machine is based on a 32-bit word architecture.
+        const IS_32BIT_MACHINE = 0x0100;
+
+        /// Debugging information has been stripped.
+        const DEBUG_STRIPPED = 0x0200;
+
+        /// If run from a removable device, copy to swap and run from there.
+        const REMOVABLE_RUN_FROM_SWAP = 0x0400;
+
+        /// If run from a network path, copy to swap and run from there.
+        const NET_RUN_FROM_SWAP = 0x0800;
+
+        /// Image is a system file (e.g. driver) and not a user program.
+        const SYSTEM = 0x1000;
+
+        /// Image is a dynamic-link library.
+        const DLL = 0x2000;
+
+        /// Should only be run on uniprocessor machines.
+        const UP_SYSTEM_ONLY = 0x4000;
+
+        /// Big-endian integers on little-endian machines. Deprecated.
+        const BYTES_REVERSED_HI  = 0x8000;
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OptionalHeader {
+    Coff(OptionalCoffHeader),
+    Other { magic: u16, data: Vec<u8> },
+}
+impl OptionalHeader {
+    pub fn read<R: Read + Seek>(reader: &mut R, optional_header_size: u16) -> Result<Option<Self>, io::Error> {
+        // optional header cases:
+        // * PE32 without Windows header: 28 bytes
+        // * PE32+ without Windows header: 24 bytes
+        // * PE32 with Windows header: 96 bytes
+        // * PE32+ with Windows header: 112 bytes
+        // possibly followed by data directories
+
+        if optional_header_size < 2 {
+            // not enough for even the magic value
+            return Ok(None);
+        }
+
+        // find out what kind of optional header we're dealing with
+        let mut opt_header_type_buf = [0u8; 2];
+        reader.read_exact(&mut opt_header_type_buf)?;
+        let opt_header_type = u16::from_le_bytes(opt_header_type_buf);
+
+        let (coff_size, has_base_of_data) = match opt_header_type {
+            0x010B => (28, true), // PE32
+            0x020B => (24, false), // PE32+
+            other_magic => {
+                let data_size: usize = (optional_header_size - 2).into();
+                let mut data_buf = vec![0u8; data_size];
+                reader.read_exact(&mut data_buf)?;
+                return Ok(Some(Self::Other { magic: other_magic, data: data_buf }));
+            },
+        };
+
+        if optional_header_size < coff_size {
+            // not big enough for the COFF header
+            let data_size: usize = (optional_header_size - 2).into();
+            let mut data_buf = vec![0u8; data_size];
+            reader.read_exact(&mut data_buf)?;
+            return Ok(Some(Self::Other { magic: opt_header_type, data: data_buf }));
+        }
+
+        let mut coff_buf = vec![0u8; (coff_size - 2).into()];
+        reader.read_exact(&mut coff_buf)?;
+
+        let major_linker_version = coff_buf[0];
+        let minor_linker_version = coff_buf[1];
+        let code_size = u32::from_le_bytes(coff_buf[2..6].try_into().unwrap());
+        let initialized_data_size = u32::from_le_bytes(coff_buf[6..10].try_into().unwrap());
+        let uninitialized_data_size = u32::from_le_bytes(coff_buf[10..14].try_into().unwrap());
+        let entry_point_addr = u32::from_le_bytes(coff_buf[10..14].try_into().unwrap());
+        let base_of_code = u32::from_le_bytes(coff_buf[14..18].try_into().unwrap());
+
+        let base_of_data = if has_base_of_data {
+            Some(u32::from_le_bytes(coff_buf[18..22].try_into().unwrap()))
+        } else {
+            None
+        };
+
+        // what about the Windows header?
+        let (is_64, windows_header_read_bytes, windows_header_size_requirement) = match opt_header_type {
+            0x010B => (false, 68, 96),
+            0x020B => (true, 88, 112),
+            _ => unreachable!(),
+        };
+        let optional_windows_header = if optional_header_size >= windows_header_size_requirement {
+            let mut win_buf = vec![0u8; windows_header_read_bytes];
+            reader.read_exact(&mut win_buf)?;
+
+            let mut i = 0;
+            let image_base = if is_64 {
+                let ib = u64::from_le_bytes(win_buf[i..i+8].try_into().unwrap());
+                i += 8;
+                ib
+            } else {
+                let ib = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap()).into();
+                i += 4;
+                ib
+            };
+            let section_alignment = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let file_alignment = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let major_os_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let minor_os_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let major_image_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let minor_image_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let major_subsystem_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let minor_subsystem_version = u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap());
+            i += 2;
+            let win32_version_value = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let image_size = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let headers_size = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let checksum = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let subsystem = Subsystem::from_base_type(u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap()));
+            i += 2;
+            let dll_characteristics = DllCharacteristics::from_bits_retain(u16::from_le_bytes(win_buf[i..i+2].try_into().unwrap()));
+            i += 2;
+            let stack_reserve_size = if is_64 {
+                let val = u64::from_le_bytes(win_buf[i..i+8].try_into().unwrap());
+                i += 8;
+                val
+            } else {
+                let val = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap()).into();
+                i += 4;
+                val
+            };
+            let stack_commit_size = if is_64 {
+                let val = u64::from_le_bytes(win_buf[i..i+8].try_into().unwrap());
+                i += 8;
+                val
+            } else {
+                let val = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap()).into();
+                i += 4;
+                val
+            };
+            let heap_reserve_size = if is_64 {
+                let val = u64::from_le_bytes(win_buf[i..i+8].try_into().unwrap());
+                i += 8;
+                val
+            } else {
+                let val = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap()).into();
+                i += 4;
+                val
+            };
+            let heap_commit_size = if is_64 {
+                let val = u64::from_le_bytes(win_buf[i..i+8].try_into().unwrap());
+                i += 8;
+                val
+            } else {
+                let val = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap()).into();
+                i += 4;
+                val
+            };
+            let loader_flags = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let data_directory_entry_count = u32::from_le_bytes(win_buf[i..i+4].try_into().unwrap());
+            i += 4;
+            let _ = i;
+
+            // assemble what we have
+            let mut windows_header = OptionalWindowsHeader {
+                image_base,
+                section_alignment,
+                file_alignment,
+                major_os_version,
+                minor_os_version,
+                major_image_version,
+                minor_image_version,
+                major_subsystem_version,
+                minor_subsystem_version,
+                win32_version_value,
+                image_size,
+                headers_size,
+                checksum,
+                subsystem,
+                dll_characteristics,
+                stack_reserve_size,
+                stack_commit_size,
+                heap_reserve_size,
+                heap_commit_size,
+                loader_flags,
+                data_directory_entries: Vec::with_capacity(0),
+            };
+
+            // do we have enough space for the data directory entries?
+            let data_directory_byte_count = data_directory_entry_count * 8;
+            if u32::from(windows_header_size_requirement) + data_directory_byte_count >= u32::from(optional_header_size) {
+                // yes; go for it
+                windows_header.data_directory_entries
+                    .reserve(data_directory_entry_count.try_into().unwrap());
+
+                for _ in 0..data_directory_entry_count {
+                    let mut entry_buf = [0u8; 8];
+                    reader.read_exact(&mut entry_buf)?;
+                    let address = u32::from_le_bytes(entry_buf[0..4].try_into().unwrap());
+                    let size = u32::from_le_bytes(entry_buf[4..8].try_into().unwrap());
+                    windows_header.data_directory_entries.push(DataDirectoryEntry {
+                        address,
+                        size,
+                    });
+                }
+            }
+
+            Some(windows_header)
+        } else {
+            None
+        };
+
+        // collect it all
+        Ok(Some(Self::Coff(OptionalCoffHeader {
+            magic: opt_header_type,
+            major_linker_version,
+            minor_linker_version,
+            code_size,
+            initialized_data_size,
+            uninitialized_data_size,
+            entry_point_addr,
+            base_of_code,
+            base_of_data,
+            optional_windows_header,
+        })))
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct OptionalCoffHeader {
+    pub magic: u16,
+    pub major_linker_version: u8,
+    pub minor_linker_version: u8,
+    pub code_size: u32,
+    pub initialized_data_size: u32,
+    pub uninitialized_data_size: u32,
+    pub entry_point_addr: u32,
+    pub base_of_code: u32,
+    pub base_of_data: Option<u32>, // PE32 only, not in PE32+
+
+    pub optional_windows_header: Option<OptionalWindowsHeader>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct OptionalWindowsHeader {
+    pub image_base: u64, // u32 on PE32
+    pub section_alignment: u32,
+    pub file_alignment: u32,
+    pub major_os_version: u16,
+    pub minor_os_version: u16,
+    pub major_image_version: u16,
+    pub minor_image_version: u16,
+    pub major_subsystem_version: u16,
+    pub minor_subsystem_version: u16,
+    pub win32_version_value: u32,
+    pub image_size: u32,
+    pub headers_size: u32,
+    pub checksum: u32,
+    pub subsystem: Subsystem, // u16
+    pub dll_characteristics: DllCharacteristics, // u16
+    pub stack_reserve_size: u64, // u32 on PE32
+    pub stack_commit_size: u64, // u32 on PE32
+    pub heap_reserve_size: u64, // u32 on PE32
+    pub heap_commit_size: u64, // u32 on PE32
+    pub loader_flags: u32,
+    // data_directory_entry_count: u32,
+    pub data_directory_entries: Vec<DataDirectoryEntry>,
+}
+impl OptionalWindowsHeader {
+    pub fn known_data_directory_entry(&self, known_entry: KnownDataDirectoryEntry) -> Option<DataDirectoryEntry> {
+        let index: usize = known_entry.into();
+        if index < self.data_directory_entries.len() {
+            Some(self.data_directory_entries[index])
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[from_to_other(base_type = u16, derive_compare = "as_int")]
+pub enum Subsystem {
+    /// Unknown subsystem.
+    Unknown = 0,
+
+    /// Driver or native process (e.g. the boot-time file system integrity check).
+    Native = 1,
+
+    /// Windows GUI process.
+    WindowsGui = 2,
+
+    /// Windows CLI process.
+    WindowsCui = 3,
+
+    // 4 reserved
+
+    /// OS/2 CLI process.
+    Os2Cui = 5,
+
+    // 6 reserved (OS/2 GUI process?)
+
+    /// POSIX CLI process.
+    PosixCui = 7,
+
+    /// Native Windows 9x driver.
+    NativeWindows = 8,
+
+    /// Windows CE GUI process.
+    WindowsCeGui = 9,
+
+    /// Extensible Firmware Interface application.
+    EfiApplication = 10,
+
+    /// Extensible Firmware Interface driver providing boot services.
+    EfiBootServiceDriver = 11,
+
+    /// Extensible Firmware Interface driver providing runtime services.
+    EfiRuntimeDriver = 12,
+
+    /// Extensible Firmware Interface ROM image.
+    EfiRom = 13,
+
+    /// Xbox executable.
+    Xbox = 14,
+
+    /// Windows boot application.
+    WindowsBootApplication = 16,
+
+    Other(u16),
+}
+
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct DllCharacteristics : u16 {
+        // 0x0001 through 0x0010 reserved
+
+        /// Image can handle high-entropy 64-bit virtual addresses.
+        const HIGH_ENTROPY_VIRTUAL_ADDRESSES = 0x0020;
+
+        /// DLL can be relocated at load time.
+        const DYNAMIC_BASE = 0x0040;
+
+        /// Code integrity checks are enforced.
+        const FORCE_INTEGRITY = 0x0080;
+
+        /// Image is compatible with the No-Execute flag.
+        const NX_COMPATIBILITY = 0x0100;
+
+        /// Image is isolation-aware but do not isolate it.
+        const NO_ISOLATION = 0x0200;
+
+        /// No structured-exception handling is used in this image.
+        const NO_SEH = 0x0400;
+
+        /// Do not bind this image.
+        const NO_BIND = 0x0800;
+
+        /// Image must execute in an AppContainer.
+        const APPCONTAINER = 0x1000;
+
+        /// Image is a Windows Driver Model driver.
+        const WDM_DRIVER = 0x2000;
+
+        /// Image supports Control Flow Guard.
+        const GUARD_CF = 0x4000;
+
+        /// Image is aware of Terminal Services.
+        const TERMINAL_SERVER_AWARE = 0x8000;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DataDirectoryEntry {
+    pub address: u32,
+    pub size: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum KnownDataDirectoryEntry {
+    ExportTable,
+    ImportTable,
+    ResourceTable,
+    ExceptionTable,
+    CertificateTable,
+    BaseRelocationTable,
+    Debug,
+    Architecture,
+    GlobalPtr,
+    TlsTable,
+    LoadConfigTable,
+    BoundImport,
+    ImportAddressTable,
+    DelayImportDescriptor,
+    ClrRuntimeHeader,
+    Reserved15,
+}
+impl From<KnownDataDirectoryEntry> for usize {
+    fn from(value: KnownDataDirectoryEntry) -> Self {
+        match value {
+            KnownDataDirectoryEntry::ExportTable => 0,
+            KnownDataDirectoryEntry::ImportTable => 1,
+            KnownDataDirectoryEntry::ResourceTable => 2,
+            KnownDataDirectoryEntry::ExceptionTable => 3,
+            KnownDataDirectoryEntry::CertificateTable => 4,
+            KnownDataDirectoryEntry::BaseRelocationTable => 5,
+            KnownDataDirectoryEntry::Debug => 6,
+            KnownDataDirectoryEntry::Architecture => 7,
+            KnownDataDirectoryEntry::GlobalPtr => 8,
+            KnownDataDirectoryEntry::TlsTable => 9,
+            KnownDataDirectoryEntry::LoadConfigTable => 10,
+            KnownDataDirectoryEntry::BoundImport => 11,
+            KnownDataDirectoryEntry::ImportAddressTable => 12,
+            KnownDataDirectoryEntry::DelayImportDescriptor => 13,
+            KnownDataDirectoryEntry::ClrRuntimeHeader => 14,
+            KnownDataDirectoryEntry::Reserved15 => 15,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SectionTableEntry {
+    pub name: [u8; 8],
+    pub virtual_size: u32,
+    pub virtual_address: u32,
+    pub raw_data_size: u32,
+    pub raw_data_pointer: u32,
+    pub relocations_pointer: u32,
+    pub line_numbers_pointer: u32,
+    pub relocations_count: u16,
+    pub line_numbers_count: u16,
+    pub characteristics: SectionCharacteristics, // u32
+}
+impl SectionTableEntry {
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut entry_buf = [0u8; 40];
+        reader.read_exact(&mut entry_buf)?;
+
+        let name = entry_buf[0..8].try_into().unwrap();
+        let virtual_size = u32::from_le_bytes(entry_buf[8..12].try_into().unwrap());
+        let virtual_address = u32::from_le_bytes(entry_buf[12..16].try_into().unwrap());
+        let raw_data_size = u32::from_le_bytes(entry_buf[16..20].try_into().unwrap());
+        let raw_data_pointer = u32::from_le_bytes(entry_buf[20..24].try_into().unwrap());
+        let relocations_pointer = u32::from_le_bytes(entry_buf[24..28].try_into().unwrap());
+        let line_numbers_pointer = u32::from_le_bytes(entry_buf[28..32].try_into().unwrap());
+        let relocations_count = u16::from_le_bytes(entry_buf[32..34].try_into().unwrap());
+        let line_numbers_count = u16::from_le_bytes(entry_buf[34..36].try_into().unwrap());
+        let characteristics = SectionCharacteristics::from_bits_retain(u32::from_le_bytes(entry_buf[36..40].try_into().unwrap()));
+
+        Ok(Self {
+            name,
+            virtual_size,
+            virtual_address,
+            raw_data_size,
+            raw_data_pointer,
+            relocations_pointer,
+            line_numbers_pointer,
+            relocations_count,
+            line_numbers_count,
+            characteristics,
+        })
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct SectionCharacteristics : u32 {
+        const NO_PAD = 0x0000_0008;
+        const CONTAINS_CODE = 0x0000_0020;
+        const CONTAINS_INITIALIZED_DATA = 0x0000_0040;
+        const CONTAINS_UNINITIALIZED_DATA = 0x0000_0080;
+        const LINK_OTHER = 0x0000_0100;
+        const LINK_INFO = 0x0000_0200;
+        const LINK_REMOVE = 0x0000_0800;
+        const LINK_COMMON_DATA = 0x0000_1000;
+        const GLOBAL_POINTER_RELATIVE = 0x0000_8000;
+        const MEM_PURGEABLE = 0x0000_8000;
+        const MEM_LOCKED = 0x0004_0000;
+        const MEM_PRELOAD = 0x0008_0000;
+        const ALIGN_BYTES_SHIFT_COUNT_1 = 0x0010_0000;
+        const ALIGN_BYTES_SHIFT_COUNT_2 = 0x0020_0000;
+        const ALIGN_BYTES_SHIFT_COUNT_4 = 0x0040_0000;
+        const ALIGN_BYTES_SHIFT_COUNT_8 = 0x0080_0000;
+        const LINK_NRELOC_OVFL = 0x0100_0000;
+        const MEM_DISCARDABLE = 0x0200_0000;
+        const MEM_NOT_CACHED = 0x0400_0000;
+        const MEM_NOT_PAGED = 0x0800_0000;
+        const MEM_SHARED = 0x1000_0000;
+        const MEM_EXECUTE = 0x2000_0000;
+        const MEM_READ = 0x4000_0000;
+        const MEM_WRITE = 0x8000_0000;
+    }
+}
