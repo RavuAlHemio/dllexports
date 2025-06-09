@@ -56,6 +56,23 @@ pub enum Symbol {
     ByOrdinal { ordinal: u32 },
     ByNameAndOrdinal { name: String, ordinal: u32 },
 }
+impl Symbol {
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::ByName { name } => Some(name),
+            Self::ByOrdinal { .. } => None,
+            Self::ByNameAndOrdinal { name, .. } => Some(name),
+        }
+    }
+
+    pub fn ordinal(&self) -> Option<u32> {
+        match self {
+            Self::ByName { .. } => None,
+            Self::ByOrdinal { ordinal } => Some(*ordinal),
+            Self::ByNameAndOrdinal { ordinal, .. } => Some(*ordinal),
+        }
+    }
+}
 
 /// Sometimes things go wrong.
 #[derive(Debug)]

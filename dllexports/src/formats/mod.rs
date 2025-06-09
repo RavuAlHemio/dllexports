@@ -4,9 +4,11 @@ mod fat;
 
 use std::io::Cursor;
 
-use binms::ne;
+use binms::ne::{self, SegmentEntryFlags};
 
-use crate::{data_mgmt::{Error, IdentifiedFile}, formats::fat::FatFileSystem};
+use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
+use crate::formats::exe::NewExecutable;
+use crate::formats::fat::FatFileSystem;
 
 
 fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
@@ -33,8 +35,58 @@ fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
             Ok(ne) => ne,
             Err(e) => return Some(Err(Error::Io(e))),
         };
-        todo!("collect exports from NE file");
-        //Some(Ok(IdentifiedFile::SymbolExporter(new_executable)))
+
+        // collect exported entry points and their ordinals
+        let mut exports = Vec::new();
+        let mut ordinal: u32 = 0;
+        for entry in &new_executable.entry_table {
+            match entry {
+                ne::EntryBundle::Unused { entry_count } => {
+                    ordinal += u32::from(*entry_count);
+                },
+                ne::EntryBundle::Fixed { entries, .. } => {
+                    for entry in entries {
+                        if entry.flags.contains(SegmentEntryFlags::EXPORTED) {
+                            exports.push(Symbol::ByOrdinal {
+                                ordinal: ordinal,
+                            });
+                        }
+                        ordinal += 1;
+                    }
+                },
+                ne::EntryBundle::Moveable { entries } => {
+                    for entry in entries {
+                        if entry.flags.contains(SegmentEntryFlags::EXPORTED) {
+                            exports.push(Symbol::ByOrdinal {
+                                ordinal: ordinal,
+                            });
+                        }
+                        ordinal += 1;
+                    }
+                },
+            }
+        }
+
+        // run through resident and nonresident name tables to enrich ordinals with names
+        for table in &[&new_executable.resident_name_table, &new_executable.non_resident_name_table] {
+            for entry in *table {
+                let name_bytes: &[u8] = entry.name.as_ref();
+                let Ok(name) = String::from_utf8(name_bytes.to_vec()) else { continue };
+
+                let symbol_opt = exports.iter_mut()
+                    .filter(|s| s.ordinal() == Some(entry.ordinal_number.into()))
+                    .nth(0);
+                let Some(symbol) = symbol_opt else { continue };
+                *symbol = Symbol::ByNameAndOrdinal {
+                    name,
+                    ordinal: symbol.ordinal().unwrap(),
+                };
+            }
+        }
+
+        Some(Ok(IdentifiedFile::SymbolExporter(Box::new(NewExecutable {
+            exports,
+        }))))
     } else {
         None
     }
