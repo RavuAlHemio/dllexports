@@ -636,6 +636,45 @@ impl SectionTableEntry {
             characteristics,
         })
     }
+
+    pub fn sections_overlap(entries: &[SectionTableEntry]) -> bool {
+        if entries.len() == 0 {
+            // empty section table has no overlap
+            return false;
+        }
+
+        let mut entry_references: Vec<&SectionTableEntry> = entries.iter().collect();
+
+        {
+            // check overlap of raw (in-file) structure
+            entry_references.sort_unstable_by_key(|e| (e.raw_data_pointer, e.raw_data_size));
+            let mut iterator = entry_references.iter();
+            let mut prev_entry = iterator.next().unwrap();
+            while let Some(entry) = iterator.next() {
+                if prev_entry.raw_data_pointer + prev_entry.raw_data_size > entry.raw_data_pointer {
+                    // overlap!
+                    return true;
+                }
+                prev_entry = entry;
+            }
+        }
+
+        {
+            // check overlap of virtual (in-memory) structure
+            entry_references.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size));
+            let mut iterator = entry_references.iter();
+            let mut prev_entry = iterator.next().unwrap();
+            while let Some(entry) = iterator.next() {
+                if prev_entry.virtual_address + prev_entry.virtual_size > entry.virtual_address {
+                    // overlap!
+                    return true;
+                }
+                prev_entry = entry;
+            }
+        }
+
+        false
+    }
 }
 
 bitflags! {
@@ -666,4 +705,49 @@ bitflags! {
         const MEM_READ = 0x4000_0000;
         const MEM_WRITE = 0x8000_0000;
     }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExportData {
+    pub export_flags: u32,
+    pub time_date_stamp: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    // pub name_rva: u32,
+    pub name: Option<String>,
+    pub ordinal_base: u32,
+    // pub address_table_entry_count: u32,
+    // pub name_pointer_and_ordinal_table_entry_count: u32,
+    // pub address_table_rva: u32,
+    // pub name_pointer_rva: u32,
+    // pub ordinal_table_rva: u32,
+    pub address_table: Vec<ExportAddressTableEntry>,
+    pub name_pointer_table: Vec<u32>,
+    pub ordinal_table: Vec<u16>,
+}
+impl ExportData {
+    pub fn read<R: Read + Seek>(reader: &mut R, sections: &[SectionTableEntry]) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 40];
+        reader.read_exact(&mut buf)?;
+
+        let export_flags = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let time_date_stamp = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+        let major_version = u16::from_le_bytes(buf[8..10].try_into().unwrap());
+        let minor_version = u16::from_le_bytes(buf[10..12].try_into().unwrap());
+        let name_rva = u32::from_le_bytes(buf[12..16].try_into().unwrap());
+        let ordinal_base = u32::from_le_bytes(buf[16..20].try_into().unwrap());
+        let address_table_entry_count = u32::from_le_bytes(buf[20..24].try_into().unwrap());
+        let name_pointer_and_ordinal_table_entry_count = u32::from_le_bytes(buf[24..28].try_into().unwrap());
+        let address_table_rva = u32::from_le_bytes(buf[28..32].try_into().unwrap());
+        let name_pointer_rva = u32::from_le_bytes(buf[32..36].try_into().unwrap());
+        let ordinal_table_rva = u32::from_le_bytes(buf[36..40].try_into().unwrap());
+
+
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ExportAddressTableEntry {
+    Export { export_rva: u32 },
+    Forwarder { target: String },
 }
