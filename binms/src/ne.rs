@@ -285,8 +285,8 @@ impl SegmentTableEntry {
                 let target_and_flags = record_buf[1];
                 let source_chain_offset = u16::from_le_bytes(record_buf[2..4].try_into().unwrap());
 
-                let target_type = RelocationEntryTargetType::try_from_repr(target_and_flags & 0b0000_0111).unwrap();
-                let flags = RelocationEntryFlags::from_bits_retain(target_and_flags & 0b1111_1000);
+                let target_type = RelocationEntryTargetType::try_from_repr(target_and_flags & 0b0000_0011).unwrap();
+                let flags = RelocationEntryFlags::from_bits_retain(target_and_flags & 0b1111_1100);
 
                 let target = match target_type {
                     RelocationEntryTargetType::InternalReference => {
