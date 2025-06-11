@@ -16,6 +16,26 @@ use std::path::{Path, PathBuf};
 pub struct PathSequence {
     parts: Vec<PathBuf>,
 }
+impl PathSequence {
+    pub fn push<P: Into<PathBuf>>(&mut self, member: P) {
+        self.parts.push(member.into())
+    }
+}
+impl From<Vec<PathBuf>> for PathSequence {
+    fn from(value: Vec<PathBuf>) -> Self {
+        Self {
+            parts: value,
+        }
+    }
+}
+impl From<PathSequence> for Vec<PathBuf> {
+    fn from(value: PathSequence) -> Self { value.parts }
+}
+impl AsRef<[PathBuf]> for PathSequence {
+    fn as_ref(&self) -> &[PathBuf] {
+        &self.parts
+    }
+}
 
 /// A container file that contains multiple files.
 ///

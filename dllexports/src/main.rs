@@ -2,12 +2,15 @@ mod data_mgmt;
 mod formats;
 
 
-use std::fs::File;
+use std::fs::{read_dir, File};
 use std::io::{Cursor, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
+
+use crate::data_mgmt::{IdentifiedFile, PathSequence};
+use crate::formats::interpret_file;
 
 
 #[derive(Parser)]
@@ -19,6 +22,7 @@ enum ProgMode {
     MzHeader(InputFileOnlyArgs),
     NeHeader(InputFileOnlyArgs),
     Interpret(InputFileOnlyArgs),
+    Scan(ScanArgs),
 }
 
 #[derive(Parser)]
@@ -42,6 +46,11 @@ struct InputFileAndIndexArgs {
 struct InputFileAndOptIndexArgs {
     pub input_file: PathBuf,
     pub index: Option<u32>,
+}
+
+#[derive(Parser)]
+struct ScanArgs {
+    pub dir: Option<PathBuf>,
 }
 
 
@@ -177,6 +186,123 @@ fn main() {
             let interpreted = crate::formats::interpret_file(&input_bytes)
                 .expect("failed to interpret input file");
             println!("{:#?}", interpreted);
+        },
+        ProgMode::Scan(args) => {
+            // scan the file system recursively
+            let dot_path = Path::new(".");
+            let top_path = args.dir.as_deref()
+                .unwrap_or(dot_path);
+
+            let mut file_list: Vec<PathBuf> = Vec::new();
+            let mut dir_stack: Vec<PathBuf> = vec![top_path.to_owned()];
+            while let Some(path) = dir_stack.pop() {
+                let entries = match read_dir(&path) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("failed to read directory {}: {}", path.display(), e);
+                        continue;
+                    },
+                };
+
+                for entry_res in entries {
+                    let entry = match entry_res {
+                        Ok(e) => e,
+                        Err(e) => {
+                            eprintln!("failed to read directory entry from {}: {}", path.display(), e);
+                            continue;
+                        },
+                    };
+
+                    let entry_type = match entry.file_type() {
+                        Ok(e) => e,
+                        Err(e) => {
+                            eprintln!("failed to read type of {}: {}", entry.path().display(), e);
+                            continue;
+                        },
+                    };
+
+                    if entry_type.is_dir() {
+                        dir_stack.push(entry.path());
+                    } else if entry_type.is_file() {
+                        file_list.push(entry.path());
+                    }
+                }
+            }
+
+            // run through the files
+            for file_path in file_list {
+                let file_data = match std::fs::read(&file_path) {
+                    Ok(fd) => fd,
+                    Err(e) => {
+                        eprintln!("failed to read {}: {}", file_path.display(), e);
+                        continue;
+                    },
+                };
+                let path_sequence: PathSequence = vec![file_path].into();
+                scan_file(&path_sequence, &file_data);
+            }
+        },
+    }
+}
+
+
+fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
+    eprintln!("scan_file {:?}", parent_path_sequence);
+    match interpret_file(data) {
+        Ok(IdentifiedFile::MultiFileContainer(mfc)) => {
+            // scan each child file
+            let files = match mfc.list_files() {
+                Ok(fs) => fs,
+                Err(e) => {
+                    eprintln!("failed to list files of {:?}: {}", parent_path_sequence, e);
+                    return;
+                },
+            };
+            for file in files {
+                let mut child_path_sequence = parent_path_sequence.clone();
+                child_path_sequence.push(&file);
+
+                let file_data = match mfc.read_file(&file) {
+                    Ok(fd) => fd,
+                    Err(e) => {
+                        eprintln!("failed to obtain {:?}: {}", child_path_sequence, e);
+                        continue;
+                    },
+                };
+                scan_file(&child_path_sequence, &file_data);
+            }
+        },
+        Ok(IdentifiedFile::SingleFileContainer(sfc)) => {
+            let mut child_path_sequence = parent_path_sequence.clone();
+            child_path_sequence.push(PathBuf::new());
+
+            let file_data = match sfc.read_file() {
+                Ok(fd) => fd,
+                Err(e) => {
+                    eprintln!("failed to obtain {:?}: {}", child_path_sequence, e);
+                    return;
+                },
+            };
+            scan_file(&child_path_sequence, &file_data);
+        },
+        Ok(IdentifiedFile::SymbolExporter(symex)) => {
+            let symbols = match symex.read_symbols() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("failed to read symbols from {:?}: {}", parent_path_sequence, e);
+                    return;
+                },
+            };
+            for symbol in symbols {
+                println!("{:?}: {:?}", parent_path_sequence, symbol);
+            }
+        },
+        Ok(IdentifiedFile::Unidentified) => {
+            // guess this one's not that interesting
+            return;
+        },
+        Err(e) => {
+            eprintln!("failed to interpret file at {:?}: {}", parent_path_sequence, e);
         },
     }
 }
