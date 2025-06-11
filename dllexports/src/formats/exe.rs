@@ -10,3 +10,14 @@ impl SymbolExporter for NewExecutable {
         Ok(self.exports.clone())
     }
 }
+
+
+#[derive(Debug)]
+pub struct PortableExecutable {
+    pub exports: Vec<Symbol>,
+}
+impl SymbolExporter for PortableExecutable {
+    fn read_symbols(&self) -> Result<Vec<Symbol>, crate::data_mgmt::Error> {
+        Ok(self.exports.clone())
+    }
+}

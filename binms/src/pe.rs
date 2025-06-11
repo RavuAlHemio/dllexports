@@ -3,10 +3,12 @@
 //! The PE format was introduced in Windows NT 3.1 and Windows 95; it is based on COFF and used by
 //! Windows to this day.
 
-use std::io::{self, Read, Seek, SeekFrom};
+use std::{collections::BTreeMap, io::{self, Read, Seek, SeekFrom}};
 
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
+
+use crate::read_nul_terminated_ascii_string;
 
 
 const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
@@ -27,7 +29,7 @@ pub struct Executable {
     pub optional_header_size: u16,
     pub characteristics: Characteristics, // u16
     pub optional_header: Option<OptionalHeader>,
-    pub section_table: Vec<SectionTableEntry>,
+    pub section_table: SectionTable,
 }
 impl Executable {
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
@@ -43,9 +45,9 @@ impl Executable {
         let pe_header_offset: u64 = u32::from_le_bytes(offset_buf).into();
         reader.seek(SeekFrom::Start(pe_header_offset))?;
 
-        let mut signature_buf = [0u8; 2];
+        let mut signature_buf = [0u8; 4];
         reader.read_exact(&mut signature_buf)?;
-        if &signature_buf != b"PE" {
+        if &signature_buf != b"PE\0\0" {
             return Err(io::ErrorKind::InvalidData.into());
         }
 
@@ -63,13 +65,14 @@ impl Executable {
         let optional_header = OptionalHeader::read(reader, optional_header_size)?;
 
         // seek past optional header
-        reader.seek(SeekFrom::Start(pe_header_offset + 22 + u64::from(optional_header_size)))?;
+        reader.seek(SeekFrom::Start(pe_header_offset + 24 + u64::from(optional_header_size)))?;
 
-        let mut section_table = Vec::with_capacity(section_count.into());
+        let mut section_table_entries = Vec::with_capacity(section_count.into());
         for _ in 0..section_count {
             let entry = SectionTableEntry::read(reader)?;
-            section_table.push(entry);
+            section_table_entries.push(entry);
         }
+        let section_table = SectionTable::from(section_table_entries);
 
         Ok(Self {
             mz,
@@ -594,6 +597,93 @@ impl From<KnownDataDirectoryEntry> for usize {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SectionTable {
+    entries: Vec<SectionTableEntry>,
+}
+impl SectionTable {
+    pub fn as_entries(&self) -> &[SectionTableEntry] {
+        &self.entries
+    }
+
+    pub fn has_overlap(&self) -> bool {
+        if self.entries.len() == 0 {
+            // empty section table has no overlap
+            return false;
+        }
+
+        let mut entry_references: Vec<&SectionTableEntry> = self.entries.iter().collect();
+
+        {
+            // check overlap of raw (in-file) structure
+            entry_references.sort_unstable_by_key(|e| (e.raw_data_pointer, e.raw_data_size));
+            let mut iterator = entry_references.iter();
+            let mut prev_entry = iterator.next().unwrap();
+            while let Some(entry) = iterator.next() {
+                if prev_entry.raw_data_pointer + prev_entry.raw_data_size > entry.raw_data_pointer {
+                    // overlap!
+                    return true;
+                }
+                prev_entry = entry;
+            }
+        }
+
+        {
+            // check overlap of virtual (in-memory) structure
+            entry_references.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size));
+            let mut iterator = entry_references.iter();
+            let mut prev_entry = iterator.next().unwrap();
+            while let Some(entry) = iterator.next() {
+                if prev_entry.virtual_address + prev_entry.virtual_size > entry.virtual_address {
+                    // overlap!
+                    return true;
+                }
+                prev_entry = entry;
+            }
+        }
+
+        false
+    }
+
+    pub fn virtual_to_raw(&self, virtual_addr: u32) -> Option<u32> {
+        for entry in &self.entries {
+            if virtual_addr >= entry.virtual_address && virtual_addr < entry.virtual_address + entry.virtual_size {
+                let offset = virtual_addr - entry.virtual_address;
+                if offset >= entry.raw_data_size {
+                    // that won't fit
+                    return None;
+                }
+                return Some(entry.raw_data_pointer + offset);
+            }
+        }
+        None
+    }
+
+    pub fn raw_to_virtual(&self, raw_addr: u32) -> Option<u32> {
+        for entry in &self.entries {
+            if raw_addr >= entry.raw_data_pointer && raw_addr < entry.raw_data_pointer + entry.raw_data_size {
+                let offset = raw_addr - entry.raw_data_pointer;
+                if offset >= entry.virtual_size {
+                    // that won't fit
+                    return None;
+                }
+                return Some(entry.virtual_address + offset);
+            }
+        }
+        None
+    }
+}
+impl From<Vec<SectionTableEntry>> for SectionTable {
+    fn from(value: Vec<SectionTableEntry>) -> Self {
+        Self {
+            entries: value,
+        }
+    }
+}
+impl From<SectionTable> for Vec<SectionTableEntry> {
+    fn from(value: SectionTable) -> Self { value.entries }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SectionTableEntry {
     pub name: [u8; 8],
@@ -636,45 +726,6 @@ impl SectionTableEntry {
             characteristics,
         })
     }
-
-    pub fn sections_overlap(entries: &[SectionTableEntry]) -> bool {
-        if entries.len() == 0 {
-            // empty section table has no overlap
-            return false;
-        }
-
-        let mut entry_references: Vec<&SectionTableEntry> = entries.iter().collect();
-
-        {
-            // check overlap of raw (in-file) structure
-            entry_references.sort_unstable_by_key(|e| (e.raw_data_pointer, e.raw_data_size));
-            let mut iterator = entry_references.iter();
-            let mut prev_entry = iterator.next().unwrap();
-            while let Some(entry) = iterator.next() {
-                if prev_entry.raw_data_pointer + prev_entry.raw_data_size > entry.raw_data_pointer {
-                    // overlap!
-                    return true;
-                }
-                prev_entry = entry;
-            }
-        }
-
-        {
-            // check overlap of virtual (in-memory) structure
-            entry_references.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size));
-            let mut iterator = entry_references.iter();
-            let mut prev_entry = iterator.next().unwrap();
-            while let Some(entry) = iterator.next() {
-                if prev_entry.virtual_address + prev_entry.virtual_size > entry.virtual_address {
-                    // overlap!
-                    return true;
-                }
-                prev_entry = entry;
-            }
-        }
-
-        false
-    }
 }
 
 bitflags! {
@@ -714,19 +765,30 @@ pub struct ExportData {
     pub major_version: u16,
     pub minor_version: u16,
     // pub name_rva: u32,
-    pub name: Option<String>,
+    pub name: String,
     pub ordinal_base: u32,
     // pub address_table_entry_count: u32,
     // pub name_pointer_and_ordinal_table_entry_count: u32,
     // pub address_table_rva: u32,
     // pub name_pointer_rva: u32,
     // pub ordinal_table_rva: u32,
-    pub address_table: Vec<ExportAddressTableEntry>,
-    pub name_pointer_table: Vec<u32>,
-    pub ordinal_table: Vec<u16>,
+    pub ordinal_to_address: BTreeMap<u32, ExportAddressTableEntry>,
+    pub name_to_ordinal: BTreeMap<String, u32>,
 }
 impl ExportData {
-    pub fn read<R: Read + Seek>(reader: &mut R, sections: &[SectionTableEntry]) -> Result<Self, io::Error> {
+    pub fn read<R: Read + Seek>(reader: &mut R, export_directory_entry: &DataDirectoryEntry, section_table: &SectionTable) -> Result<Self, io::Error> {
+        // ensure the sections don't overlap
+        if section_table.has_overlap() {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
+        let position = reader.seek(SeekFrom::Current(0))?;
+
+        // go to offset of export directory
+        let export_directory_offset = section_table.virtual_to_raw(export_directory_entry.address)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+        reader.seek(SeekFrom::Start(export_directory_offset.into()))?;
+
         let mut buf = [0u8; 40];
         reader.read_exact(&mut buf)?;
 
@@ -742,12 +804,99 @@ impl ExportData {
         let name_pointer_rva = u32::from_le_bytes(buf[32..36].try_into().unwrap());
         let ordinal_table_rva = u32::from_le_bytes(buf[36..40].try_into().unwrap());
 
+        // start mapping
+        let name_offset = section_table.virtual_to_raw(name_rva)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+        let address_table_offset = section_table.virtual_to_raw(address_table_rva)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+        let name_pointer_offset = section_table.virtual_to_raw(name_pointer_rva)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+        let ordinal_table_offset = section_table.virtual_to_raw(ordinal_table_rva)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
 
+        // read name
+        reader.seek(SeekFrom::Start(name_offset.into()))?;
+        let name = read_nul_terminated_ascii_string(reader)?;
+
+        // read address table
+        reader.seek(SeekFrom::Start(address_table_offset.into()))?;
+        let mut ordinal_to_address = BTreeMap::new();
+        for relative_ordinal in 0..address_table_entry_count {
+            let ordinal = ordinal_base + relative_ordinal;
+            let mut address_buf = [0u8; 4];
+            reader.read_exact(&mut address_buf)?;
+            let address = u32::from_le_bytes(address_buf);
+
+            if address == 0 {
+                // skip this entry
+                continue;
+            } else if address >= export_directory_entry.address && address < export_directory_entry.address + export_directory_entry.size {
+                // forwarder
+                let addr_pos = section_table.virtual_to_raw(address)
+                    .ok_or_else(|| io::ErrorKind::InvalidData)?;
+
+                let addr_table_pos = reader.seek(SeekFrom::Current(0))?;
+                reader.seek(SeekFrom::Start(addr_pos.into()))?;
+                let target = read_nul_terminated_ascii_string(reader)?;
+                reader.seek(SeekFrom::Start(addr_table_pos))?;
+                ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Forwarder { target });
+            } else {
+                // code
+                ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Code { code_rva: address });
+            }
+        }
+
+        // read names
+        let mut name_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
+        reader.seek(SeekFrom::Start(name_pointer_offset.into()))?;
+        for _ in 0..name_pointer_and_ordinal_table_entry_count {
+            let mut address_buf = [0u8; 4];
+            reader.read_exact(&mut address_buf)?;
+            let address = u32::from_le_bytes(address_buf);
+            let offset = section_table.virtual_to_raw(address)
+                .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            let name_pointer_pos = reader.seek(SeekFrom::Current(0))?;
+            reader.seek(SeekFrom::Start(offset.into()))?;
+            let name = read_nul_terminated_ascii_string(reader)?;
+            reader.seek(SeekFrom::Start(name_pointer_pos))?;
+            name_table.push(name);
+        }
+
+        // read ordinals for the names
+        // (this is necessary because the name table is sorted ASCIIbetically to enable binary searches,
+        // so the mapping from index to ordinal must be explicit)
+        let mut name_ordinal_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
+        reader.seek(SeekFrom::Start(ordinal_table_offset.into()))?;
+        for _ in 0..name_pointer_and_ordinal_table_entry_count {
+            let mut relative_ordinal_buf = [0u8; 2];
+            reader.read_exact(&mut relative_ordinal_buf)?;
+            let relative_ordinal = u16::from_le_bytes(relative_ordinal_buf);
+            let ordinal = ordinal_base + u32::from(relative_ordinal);
+            name_ordinal_table.push(ordinal);
+        }
+
+        // join the preceding two tables
+        let name_to_ordinal: BTreeMap<String, u32> = name_table.into_iter()
+            .zip(name_ordinal_table.into_iter())
+            .collect();
+
+        reader.seek(SeekFrom::Start(position))?;
+        Ok(Self {
+            export_flags,
+            time_date_stamp,
+            major_version,
+            minor_version,
+            name,
+            ordinal_base,
+            ordinal_to_address,
+            name_to_ordinal,
+        })
     }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ExportAddressTableEntry {
-    Export { export_rva: u32 },
+    Skip,
+    Code { code_rva: u32 },
     Forwarder { target: String },
 }

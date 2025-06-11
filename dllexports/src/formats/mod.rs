@@ -2,12 +2,14 @@ mod exe;
 mod fat;
 
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 
 use binms::ne::{self, SegmentEntryFlags};
+use binms::pe::{self, ExportData, KnownDataDirectoryEntry, OptionalHeader};
 
 use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
-use crate::formats::exe::NewExecutable;
+use crate::formats::exe::{NewExecutable, PortableExecutable};
 use crate::formats::fat::FatFileSystem;
 
 
@@ -28,7 +30,55 @@ fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
     }
     let exe_type = [data[ne_pe_pos], data[ne_pe_pos+1]];
     if &exe_type == b"PE" {
-        todo!("parse PE");
+        let mut cursor = Cursor::new(data);
+        let portable_executable = match pe::Executable::read(&mut cursor) {
+            Ok(pe) => pe,
+            Err(e) => return Some(Err(Error::Io(e))),
+        };
+
+        // export table?
+        if let Some(export_table) = &portable_executable.optional_header {
+            if let OptionalHeader::Coff(coff) = &export_table {
+                if let Some(windows) = &coff.optional_windows_header {
+                    if let Some(export_directory_entry) = windows.known_data_directory_entry(KnownDataDirectoryEntry::ExportTable) {
+                        let export_data_res = ExportData::read(
+                            &mut cursor,
+                            &export_directory_entry,
+                            &portable_executable.section_table,
+                        );
+                        let export_data = match export_data_res {
+                            Ok(ed) => ed,
+                            Err(e) => return Some(Err(Error::Io(e))),
+                        };
+
+                        // collect symbols according to ordinal
+                        let mut ordinal_to_symbol = BTreeMap::new();
+                        for ordinal in export_data.ordinal_to_address.keys() {
+                            ordinal_to_symbol.insert(
+                                *ordinal,
+                                Symbol::ByOrdinal { ordinal: *ordinal },
+                            );
+                        }
+
+                        // enrich with names
+                        for (name, ordinal) in &export_data.name_to_ordinal {
+                            if let Some(symbol) = ordinal_to_symbol.get_mut(ordinal) {
+                                *symbol = Symbol::ByNameAndOrdinal {
+                                    name: name.clone(),
+                                    ordinal: *ordinal,
+                                };
+                            }
+                        }
+
+                        let exports: Vec<Symbol> = ordinal_to_symbol.into_values().collect();
+                        return Some(Ok(IdentifiedFile::SymbolExporter(Box::new(PortableExecutable {
+                            exports,
+                        }))));
+                    }
+                }
+            }
+        }
+        return None;
     } else if &exe_type == b"NE" {
         let mut cursor = Cursor::new(data);
         let new_executable = match ne::Executable::read(&mut cursor) {
