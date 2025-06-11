@@ -103,6 +103,14 @@ impl FatFileSystem {
                 continue;
             }
 
+            if entree.file_name.as_ref() == b"..      " && entree.extension.as_ref() == b"   " {
+                // parent directory
+                continue;
+            } else if entree.file_name.as_ref() == b".       " && entree.extension.as_ref() == b"   " {
+                // the directory itself
+                continue;
+            }
+
             if entree.attributes.contains(Attributes::VOLUME_LABEL) {
                 // FIXME: VFAT long file names?
                 continue;
