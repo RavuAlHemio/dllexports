@@ -2,6 +2,7 @@ mod error;
 pub mod fat;
 mod huff;
 mod io_util;
+pub mod iso9660;
 mod kwaj;
 mod ring_buffer;
 

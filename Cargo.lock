@@ -132,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "display-bytes",
+ "from-to-repr",
 ]
 
 [[package]]
