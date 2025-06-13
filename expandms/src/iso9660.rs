@@ -94,7 +94,7 @@ pub struct EndianPair<T> {
 ///
 /// * SFS: Standard File Structure
 /// * CCSFS: Coded Character Set File Structure
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct VolumeDescriptor {
     /// Volume descriptor logical block number.
     ///
@@ -322,8 +322,9 @@ bitflags! {
 /// A partially-textual representation of a timestamp.
 ///
 /// Apart from a valid date and time, a special zero value may be encoded by setting all digits to
-/// b'0' and the GMT offset to 0. This is the only situation where `year`, `month` or `day` may
-/// contain zero values, as years, days and months are customarily numbered starting with 1.
+/// b'0' (and, on ISO9660 volumes, the GMT offset to 0). This is the only situation where `year`,
+/// `month` or `day` may contain zero values, as years, days and months are customarily numbered
+/// starting with 1.
 ///
 /// 17 bytes on ISO9660 (§ 8.4.26.1), 16 bytes on High Sierra (§ 11.4.30.1).
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -334,7 +335,7 @@ pub struct DigitTimestamp {
     /// The month, in ASCII digits from b"01" to b"12", or b"00" if encoding the zero value.
     pub month: [u8; 2],
 
-    /// The month, in ASCII digits from b"01" to b"31", or b"00" if encoding the zero value.
+    /// The day, in ASCII digits from b"01" to b"31", or b"00" if encoding the zero value.
     pub day: [u8; 2],
 
     /// The hour, in ASCII digits from b"00" to b"23".
@@ -406,4 +407,153 @@ pub struct PartitionDescriptor {
     ///
     /// 1960 bytes on ISO9660, 1952 bytes on High Sierra volumes (right-padded on read with 0x00).
     pub reserved1: [u8; 1960], // 9660: [u8; 1960], HS: [u8; 1952]
+}
+
+/// An ISO9660 directory record.
+///
+/// See ISO9660 § 9.1.
+///
+/// Can also house a High Sierra directory record (§ 13.1).
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DirectoryRecord {
+    /// The length of the directory record.
+    pub length: u8,
+
+    /// The length of the extended attribute record.
+    ///
+    /// This is the number of logical blocks preceding the file data that contain the extended
+    /// attribute record.
+    pub extended_attribute_record_length: u8,
+
+    /// The location of this extent as a logical block number.
+    pub extent_location: EndianPair<u32>, // [u32; 2]
+
+    /// The number of bytes contained in this extent.
+    ///
+    /// This only reflects the length of the data itself, not the length of the extended attribute
+    /// record.
+    pub data_length: EndianPair<u32>, // [u32; 2]
+
+    /// The date and time at which this file was recorded.
+    pub recording_timestamp: BinaryTimestamp, // 9660: [u8; 7], HS: [u8; 6]
+
+    /// Various flags describing the kind of file.
+    pub file_flags: FileFlags, // u8
+
+    /// Reserved value.
+    ///
+    /// High Sierra only. (Removed in ISO9660 because the GMT offset was added to BinaryTimestamp.)
+    pub reserved0: Option<u8>, // 9660: (), HS: u8
+
+    /// The unit size if the file is recorded in interleaved mode.
+    ///
+    /// Zero if the file is recorded contiguously.
+    pub interleave_unit_size: u8,
+
+    /// The gap size if the file is recorded in interleaved mode.
+    ///
+    /// Zero if the file is recorded contiguously.
+    pub interleave_gap_size: u8,
+
+    /// Specifies which volume in the volume set contains this file.
+    pub volume_sequence_number: EndianPair<u16>,
+
+    // file_identifier_length: u8,
+
+    /// The file identifier.
+    ///
+    /// If this entry is a directory ([`FileFlags::DIRECTORY`] is set in `file_flags`), this may
+    /// only contain:
+    /// * d-characters
+    /// * on ISO9660 but not High Sierra: d1-characters
+    /// * a single byte 0x00 (for a descriptor describing the directory itself)
+    /// * a single byte 0x01 (for a descriptor describing the parent directory)
+    ///
+    /// The root directory is considered its own parent, so both the directory record 0x00 and the
+    /// directory record 0x01 in the root directory describe the root directory. The semantics of
+    /// 0x00 and 0x01 are found in ISO9660 § 6.8.2.2.
+    ///
+    /// If this entry is not a directory ([`FileFlags::DIRECTORY`] is not set in `file_flags`), this
+    /// may only contain:
+    /// * d-characters
+    /// * on ISO9660 but not High Sierra: d1-characters
+    /// * SEPARATOR 1 (`.`, U+002E)
+    /// * SEPARATOR 2 (`;`, U+003B)
+    pub file_identifier: Vec<u8>,
+
+    /// A reserved field to re-align the next one.
+    ///
+    /// Only present if the length of the file identifier is an even number, since the file
+    /// identifier including the length byte then comprise an odd number of bytes.
+    pub reserved1: Option<u8>,
+
+    /// Bytes reserved for system use.
+    pub system_use_bytes: Vec<u8>,
+}
+
+/// A binary representation of a timestamp.
+///
+/// Apart from a valid date and time, a special zero value may be encoded by setting all fields to
+/// 0. This is the only situation where `month` or `day` may contain zero values, as days and months
+/// are customarily numbered starting with 1.
+///
+/// 7 bytes on ISO9660 (§ 9.1.5), 6 bytes on High Sierra (§ 13.1.5).
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct BinaryTimestamp {
+    /// The year since the year 1900.
+    ///
+    /// For example, a value of 90 designates the year 1990.
+    pub year_since_1900: u8,
+
+    /// The month, a value from 1 to 12, or 0 if encoding the zero value.
+    pub month: u8,
+
+    /// The day, a value from 1 to 31, or 0 if encoding the zero value.
+    pub day: u8,
+
+    /// The hour, a value from 0 to 23.
+    pub hour: u8,
+
+    /// The minute, a value from 0 to 59.
+    pub minute: u8,
+
+    /// The second, a value from 0 to 59.
+    pub second: u8,
+
+    /// Offset from GMT in units of 15min, from -48 to 52.
+    ///
+    /// ISO9660 volumes only.
+    pub gmt_offset_15min: Option<i8>,
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct FileFlags : u8 {
+        /// Whether the file should be listed when requested by the user.
+        const EXISTENCE = (1 << 0);
+
+        /// Whether the entry is a directory, not a file.
+        const DIRECTORY = (1 << 1);
+
+        /// Whether this is an associated file, which contains additional metadata pertaining to the
+        /// actual file with the same `file_identifier`.
+        ///
+        /// Neither ISO9660 nor High Sierra define the format of the contents of an Associated File.
+        const ASSOCIATED_FILE = (1 << 2);
+
+        /// Whether the structure of the file data is reflected by the Record Format field in the
+        /// file's Extended Attribute Record.
+        const RECORD = (1 << 3);
+
+        /// Whether access control information should be considered valid when deciding whether a
+        /// user may access the file.
+        ///
+        /// The access control information in question are the Owner Identification, Group
+        /// Identification and Permissions fields in the Extended Attribute Record.
+        const PROTECTION = (1 << 4);
+
+        /// If this bit is set, more directory entries follow that describe further extents of the
+        /// file.
+        const MULTI_EXTENT = (1 << 7);
+    }
 }
