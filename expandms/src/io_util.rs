@@ -92,3 +92,58 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     impl_read_n_bits!(read_u7, 7, u8);
     impl_read_n_bits!(read_u8, 8, u8);
 }
+
+pub(crate) trait ByteBufReadable {
+    fn read(buf: &[u8], pos: &mut usize) -> Self;
+}
+impl ByteBufReadable for u8 {
+    fn read(buf: &[u8], pos: &mut usize) -> Self {
+        let ret = buf[*pos];
+        *pos += 1;
+        ret
+    }
+}
+impl<const N: usize> ByteBufReadable for [u8; N] {
+    fn read(buf: &[u8], pos: &mut usize) -> Self {
+        let ret = buf[*pos..*pos+N].try_into().unwrap();
+        *pos += N;
+        ret
+    }
+}
+
+pub(crate) trait ReadEndian {
+    fn read_be(buf: &[u8], pos: &mut usize) -> Self;
+    fn read_le(buf: &[u8], pos: &mut usize) -> Self;
+}
+macro_rules! impl_read_endian {
+    ($type:ty) => {
+        impl ReadEndian for $type {
+            fn read_be(buf: &[u8], pos: &mut usize) -> Self {
+                let size = ::std::mem::size_of::<$type>();
+                let val = <$type>::from_be_bytes(buf[*pos..*pos+size].try_into().unwrap());
+                *pos += size;
+                val
+            }
+            fn read_le(buf: &[u8], pos: &mut usize) -> Self {
+                let size = ::std::mem::size_of::<$type>();
+                let val = <$type>::from_le_bytes(buf[*pos..*pos+size].try_into().unwrap());
+                *pos += size;
+                val
+            }
+        }
+    };
+}
+impl_read_endian!(u16);
+impl_read_endian!(u32);
+
+
+fn read_byte(buf: &[u8], pos: &mut usize) -> u8 {
+    let ret = buf[*pos];
+    *pos += 1;
+    ret
+}
+fn read_bytes<const N: usize>(buf: &[u8], pos: &mut usize) -> [u8; N] {
+    let ret = buf[*pos..*pos+N].try_into().unwrap();
+    *pos += N;
+    ret
+}

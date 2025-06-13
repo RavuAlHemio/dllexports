@@ -1,8 +1,12 @@
 //! Decoding CD-ROM file systems.
 
 
+use std::io::{self, Read};
+
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
+
+use crate::io_util::{ByteBufReadable, ReadEndian};
 
 
 /// The number of bytes per logical sector.
@@ -74,11 +78,21 @@ impl Default for DescriptorType {
 }
 
 
-/// The same value, encoded once as big and once as little endian.
+/// The same value, encoded first as little endian and then as big endian.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EndianPair<T> {
     pub little_endian: T,
     pub big_endian: T,
+}
+impl<T: ReadEndian> ByteBufReadable for EndianPair<T> {
+    fn read(buf: &[u8], pos: &mut usize) -> Self {
+        let little_endian = <T as ReadEndian>::read_le(buf, pos);
+        let big_endian = <T as ReadEndian>::read_le(buf, pos);
+        Self {
+            little_endian,
+            big_endian,
+        }
+    }
 }
 
 
@@ -306,6 +320,29 @@ pub struct VolumeDescriptor {
     ///
     /// 680 bytes on High Sierra, 653 bytes on ISO9660 volumes (right-padded with 0x00 on read).
     pub reserved2: [u8; 680], // 9660: [u8; 653], HS: [u8; 680]
+}
+impl VolumeDescriptor {
+    pub fn read<R: Read>(reader: &mut R, is_high_sierra: bool) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 2048];
+        reader.read_exact(&mut buf)?;
+        let mut pos = 0;
+
+        let vd_lbn = if is_high_sierra {
+            Some(EndianPair::read(&buf, &mut pos))
+        } else {
+            None
+        };
+        let vd_type = DescriptorType::from_base_type(u8::read(&buf, &mut pos));
+        let standard_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let version = u8::read(&buf, &mut pos);
+        let flags = VolumeFlags::from_bits_retain(u8::read(&buf, &mut pos));
+        let system_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let volume_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let reserved0 = ByteBufReadable::read(&buf, &mut pos);
+        let volume_space_size = EndianPair::read(&buf, &mut pos);
+        let escape_sequences = ByteBufReadable::read(&buf, &mut pos);
+        todo!();
+    }
 }
 
 
