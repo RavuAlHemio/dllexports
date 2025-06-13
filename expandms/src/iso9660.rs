@@ -557,3 +557,189 @@ bitflags! {
         const MULTI_EXTENT = (1 << 7);
     }
 }
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExtendedAttributeRecord {
+    /// The ID of the owning user of the file.
+    pub owner_identification: EndianPair<u16>, // [u16; 2]
+
+    /// The ID of the owning group of the file.
+    pub group_identification: EndianPair<u16>, // [u16; 2]
+
+    /// Permissions pertaining to the file.
+    ///
+    /// Encoded in big-endian only.
+    pub permissions: Permissions, // u16
+
+    /// Timestamp at which the file has been created.
+    pub file_creation_timestamp: DigitTimestamp, // 9660: [u8; 17], HS: [u8; 16]
+
+    /// Timestamp at which the file has been modified.
+    pub file_modification_timestamp: DigitTimestamp, // 9660: [u8; 17], HS: [u8; 16]
+
+    /// Timestamp at which the file will expire.
+    pub file_expiration_timestamp: DigitTimestamp, // 9660: [u8; 17], HS: [u8; 16]
+
+    /// Timestamp at which the file becomes effective.
+    pub file_effective_timestamp: DigitTimestamp, // 9660: [u8; 17], HS: [u8; 16]
+
+    /// The format of each record in the file.
+    pub record_format: u8,
+
+    /// Additional attributes pertaining to the record format.
+    pub record_attributes: u8,
+
+    /// The length (or maximum length for variable-lenght records) of each record in the file.
+    pub record_length: EndianPair<u16>, // [u16; 2]
+
+    /// The identifier of a system which can use relevant system-use attributes.
+    ///
+    /// Contains a-characters or a1-characters only.
+    pub system_identifier: [u8; 32],
+
+    /// System-specific data.
+    pub system_use: [u8; 64],
+
+    /// The version of the extended attribute record.
+    ///
+    /// Both High Sierra and all hitherto published versions of ISO9660 prescribe the value 1 here,
+    /// even though the formats between High Sierra and ISO9660 diverge.
+    pub version: u8,
+
+    // pub escape_sequences_length: Option<u8>, // 9660: u8, HS: ()
+
+    /// Reserved for further standardization.
+    ///
+    /// 64 bytes (right-padded with 0x00 on read) on ISO9660 volumes, 65 bytes on High Sierra
+    /// volumes.
+    pub reserved0: [u8; 65], // 9660: [u8; 64], HS: [u8; 65]
+
+    /// The number of the path table entry for the file's parent directory.
+    ///
+    /// High Sierra only.
+    pub parent_directory_number: Option<EndianPair<u16>>,  // 9660: (), HS: [u6; 2]
+
+    // pub application_use_length: EndianPair<u16>, // [u16; 2]
+
+    /// A copy of the directory record for this file.
+    ///
+    /// High Sierra only.
+    pub directory_record: Option<DirectoryRecord>, // 9660: (), HS: see first byte
+
+    /// Data for internal application use.
+    pub application_use_data: Vec<u8>, // [u8; application_use_length]
+
+    /// Escape sequences used for decoding the file contents.
+    ///
+    /// ISO9660 only.
+    pub escape_sequences: Option<Vec<u8>>, // 9660: [u8; escape_sequences_length], HS: ()
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct Permissions : u16 {
+        /// Whether the file should not be readable by the System class of users.
+        const FORBID_SYSTEM_READ = (1 << 0);
+
+        /// Reserved; should always be set.
+        const RESERVED1 = (1 << 1);
+
+        /// Whether the file should not be executable by the System class of users.
+        const FORBID_SYSTEM_EXECUTE = (1 << 2);
+
+        /// Reserved; should always be set.
+        const RESERVED3 = (1 << 3);
+
+        /// Whether the file should not be readable by the owner.
+        const FORBID_OWNER_READ = (1 << 4);
+
+        /// Reserved; should always be set.
+        const RESERVED5 = (1 << 5);
+
+        /// Whether the file should not be executable by the owner.
+        const FORBID_OWNER_EXECUTE = (1 << 6);
+
+        /// Reserved; should always be set.
+        const RESERVED7 = (1 << 7);
+
+        /// Whether the file should not be readable by members of the group.
+        ///
+        /// If the user in question is both the owner and a member of the group, only
+        /// [`Permissions::FORBID_OWNER_READ`] applies.
+        const FORBID_GROUP_READ = (1 << 8);
+
+        /// Reserved; should always be set.
+        const RESERVED9 = (1 << 9);
+
+        /// Whether the file should not be executable by members of the group.
+        ///
+        /// If the user in question is both the owner and a member of the group, only
+        /// [`Permissions::FORBID_OWNER_EXECUTE`] applies.
+        const FORBID_GROUP_EXECUTE = (1 << 10);
+
+        /// Reserved; should always be set.
+        const RESERVED11 = (1 << 11);
+
+        /// Whether the file should not be readable by other users.
+        ///
+        /// A user is considered one of the _other users_ if they are neither the owner of the file
+        /// nor a member of the group of the file.
+        const FORBID_OTHER_READ = (1 << 12);
+
+        /// Reserved; should always be set.
+        const RESERVED13 = (1 << 13);
+
+        /// Whether the file should not be executable by other users.
+        ///
+        /// A user is considered one of the _other users_ if they are neither the owner of the file
+        /// nor a member of the group of the file.
+        const FORBID_OTHER_EXECUTE = (1 << 14);
+
+        /// Reserved; should always be set.
+        const RESERVED15 = (1 << 15);
+    }
+}
+
+/// A record in the path table.
+///
+/// The endianness of some fields depends on the endianness of this particular path table. The
+/// primary volume descriptor contains a link to a big-endian path table and a little-endian path
+/// table.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PathTableRecord {
+    // pub directory_identifier_length: u8,
+
+    /// The length of the extended attribute record, in bytes.
+    pub extended_attribute_record_length: u8,
+
+    /// The location of the first logical block of the directory's extent.
+    ///
+    /// The endianness depends on the endianness of this particular path table.
+    pub extent_location: u32,
+
+    /// The number of the parent directory.
+    ///
+    /// The endianness depends on the endianness of this particular path table.
+    pub parent_directory_number: u16,
+
+    /// The identifier describing this directory.
+    ///
+    /// Must only contain one of the following:
+    /// * a sequence of at least one d-character
+    /// * on ISO9660 but not High Sierra volumes: a sequence of at least one d1-character
+    /// * the byte 0x00 (to refer to the root directory)
+    pub directory_identifier: Vec<u8>, // [u8; directory_identifier_length]
+
+    /// A reserved field to re-align the next path table record.
+    ///
+    /// Only present if the length of the directory identifier is an odd number.
+    pub reserved0: Option<u8>,
+
+    // note that the order of fields is very different in High Sierra:
+    // 1. extent_location
+    // 2. extended_attribute_record_length
+    // 3. directory_identifier_length
+    // 4. parent_directory_number
+    // 5. directory_identifier
+    // 6. reserved0
+}
