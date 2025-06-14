@@ -103,6 +103,14 @@ impl ByteBufReadable for u8 {
         ret
     }
 }
+impl ByteBufReadable for i8 {
+    fn read(buf: &[u8], pos: &mut usize) -> Self {
+        let byte_buf = [buf[*pos]];
+        *pos += 1;
+        // byte order doesn't matter for single-byte values
+        i8::from_ne_bytes(byte_buf)
+    }
+}
 impl<const N: usize> ByteBufReadable for [u8; N] {
     fn read(buf: &[u8], pos: &mut usize) -> Self {
         let ret = buf[*pos..*pos+N].try_into().unwrap();

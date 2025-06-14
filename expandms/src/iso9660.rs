@@ -341,7 +341,117 @@ impl VolumeDescriptor {
         let reserved0 = ByteBufReadable::read(&buf, &mut pos);
         let volume_space_size = EndianPair::read(&buf, &mut pos);
         let escape_sequences = ByteBufReadable::read(&buf, &mut pos);
-        todo!();
+        let volume_set_size = EndianPair::read(&buf, &mut pos);
+        let volume_sequence_number = EndianPair::read(&buf, &mut pos);
+        let logical_block_size = EndianPair::read(&buf, &mut pos);
+        let path_table_size = EndianPair::read(&buf, &mut pos);
+        let le_path_table_location = u32::read_le(&buf, &mut pos);
+        let le_path_table_backup_location = u32::read_le(&buf, &mut pos);
+        let le_path_table_backup_location_2 = if is_high_sierra {
+            Some(u32::read_le(&buf, &mut pos))
+        } else {
+            None
+        };
+        let le_path_table_backup_location_3 = if is_high_sierra {
+            Some(u32::read_le(&buf, &mut pos))
+        } else {
+            None
+        };
+        let be_path_table_location = u32::read_be(&buf, &mut pos);
+        let be_path_table_backup_location = u32::read_be(&buf, &mut pos);
+        let be_path_table_backup_location_2 = if is_high_sierra {
+            Some(u32::read_be(&buf, &mut pos))
+        } else {
+            None
+        };
+        let be_path_table_backup_location_3 = if is_high_sierra {
+            Some(u32::read_be(&buf, &mut pos))
+        } else {
+            None
+        };
+        let root_directory_record = DirectoryRecord::read_from_volume_descriptor(&buf, &mut pos, is_high_sierra)?;
+        let volume_set_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let publisher_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let data_preparer_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let application_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let copyright_file_identifier = if is_high_sierra {
+            let hs_ident: [u8; 32] = ByteBufReadable::read(&buf, &mut pos);
+            let mut padded_ident = [0u8; 37];
+            padded_ident[..32].copy_from_slice(&hs_ident);
+            padded_ident
+        } else {
+            // full 37 bytes
+            ByteBufReadable::read(&buf, &mut pos)
+        };
+        let abstract_file_identifier = if is_high_sierra {
+            let hs_ident: [u8; 32] = ByteBufReadable::read(&buf, &mut pos);
+            let mut padded_ident = [0u8; 37];
+            padded_ident[..32].copy_from_slice(&hs_ident);
+            padded_ident
+        } else {
+            // full 37 bytes
+            ByteBufReadable::read(&buf, &mut pos)
+        };
+        let bibliographic_file_identifier = if is_high_sierra {
+            None
+        } else {
+            Some(ByteBufReadable::read(&buf, &mut pos))
+        };
+        let volume_creation_timestamp = DigitTimestamp::read(&buf, &mut pos, is_high_sierra);
+        let volume_modification_timestamp = DigitTimestamp::read(&buf, &mut pos, is_high_sierra);
+        let volume_expiration_timestamp = DigitTimestamp::read(&buf, &mut pos, is_high_sierra);
+        let volume_effective_timestamp = DigitTimestamp::read(&buf, &mut pos, is_high_sierra);
+        let file_structure_version = ByteBufReadable::read(&buf, &mut pos);
+        let reserved1 = ByteBufReadable::read(&buf, &mut pos);
+        let app_use = ByteBufReadable::read(&buf, &mut pos);
+        let reserved2 = if is_high_sierra {
+            ByteBufReadable::read(&buf, &mut pos)
+        } else {
+            let iso_ident: [u8; 653] = ByteBufReadable::read(&buf, &mut pos);
+            let mut padded_ident = [0u8; 680];
+            padded_ident[..653].copy_from_slice(&iso_ident);
+            padded_ident
+        };
+        Ok(Self {
+            vd_lbn,
+            vd_type,
+            standard_identifier,
+            version,
+            flags,
+            system_identifier,
+            volume_identifier,
+            reserved0,
+            volume_space_size,
+            escape_sequences,
+            volume_set_size,
+            volume_sequence_number,
+            logical_block_size,
+            path_table_size,
+            le_path_table_location,
+            le_path_table_backup_location,
+            le_path_table_backup_location_2,
+            le_path_table_backup_location_3,
+            be_path_table_location,
+            be_path_table_backup_location,
+            be_path_table_backup_location_2,
+            be_path_table_backup_location_3,
+            root_directory_record,
+            volume_set_identifier,
+            publisher_identifier,
+            data_preparer_identifier,
+            application_identifier,
+            copyright_file_identifier,
+            abstract_file_identifier,
+            bibliographic_file_identifier,
+            volume_creation_timestamp,
+            volume_modification_timestamp,
+            volume_expiration_timestamp,
+            volume_effective_timestamp,
+            file_structure_version,
+            reserved1,
+            app_use,
+            reserved2,
+        })
     }
 }
 
@@ -391,6 +501,32 @@ pub struct DigitTimestamp {
     ///
     /// ISO9660 volumes only.
     pub gmt_offset_15min: Option<i8>,
+}
+impl DigitTimestamp {
+    pub fn read(buf: &[u8], pos: &mut usize, is_high_sierra: bool) -> Self {
+        let year = ByteBufReadable::read(buf, pos);
+        let month = ByteBufReadable::read(buf, pos);
+        let day = ByteBufReadable::read(buf, pos);
+        let hour = ByteBufReadable::read(buf, pos);
+        let minute = ByteBufReadable::read(buf, pos);
+        let second = ByteBufReadable::read(buf, pos);
+        let centisecond = ByteBufReadable::read(buf, pos);
+        let gmt_offset_15min = if is_high_sierra {
+            None
+        } else {
+            Some(ByteBufReadable::read(buf, pos))
+        };
+        Self {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            centisecond,
+            gmt_offset_15min,
+        }
+    }
 }
 
 /// An ISO9660 volume partition descriptor.
@@ -444,6 +580,47 @@ pub struct PartitionDescriptor {
     ///
     /// 1960 bytes on ISO9660, 1952 bytes on High Sierra volumes (right-padded on read with 0x00).
     pub reserved1: [u8; 1960], // 9660: [u8; 1960], HS: [u8; 1952]
+}
+impl PartitionDescriptor {
+    pub fn read<R: Read>(reader: &mut R, is_high_sierra: bool) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 2048];
+        reader.read_exact(&mut buf)?;
+        let mut pos = 0;
+
+        let vd_lbn = if is_high_sierra {
+            Some(EndianPair::read(&buf, &mut pos))
+        } else {
+            None
+        };
+        let vd_type = DescriptorType::from_base_type(u8::read(&buf, &mut pos));
+        let standard_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let version = u8::read(&buf, &mut pos);
+        let reserved0 = ByteBufReadable::read(&buf, &mut pos);
+        let system_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let partition_identifier = ByteBufReadable::read(&buf, &mut pos);
+        let partition_location = ByteBufReadable::read(&buf, &mut pos);
+        let partition_size = ByteBufReadable::read(&buf, &mut pos);
+        let reserved1 = if is_high_sierra {
+            let hs_ident: [u8; 1952] = ByteBufReadable::read(&buf, &mut pos);
+            let mut padded_ident = [0u8; 1960];
+            padded_ident[..1952].copy_from_slice(&hs_ident);
+            padded_ident
+        } else {
+            ByteBufReadable::read(&buf, &mut pos)
+        };
+        Ok(Self {
+            vd_lbn,
+            vd_type,
+            standard_identifier,
+            version,
+            reserved0,
+            system_identifier,
+            partition_identifier,
+            partition_location,
+            partition_size,
+            reserved1,
+        })
+    }
 }
 
 /// An ISO9660 directory record.
@@ -516,7 +693,7 @@ pub struct DirectoryRecord {
     /// * on ISO9660 but not High Sierra: d1-characters
     /// * SEPARATOR 1 (`.`, U+002E)
     /// * SEPARATOR 2 (`;`, U+003B)
-    pub file_identifier: Vec<u8>,
+    pub file_identifier: Vec<u8>, // [u8; file_identifier_length]
 
     /// A reserved field to re-align the next one.
     ///
@@ -525,7 +702,7 @@ pub struct DirectoryRecord {
     pub reserved1: Option<u8>,
 
     /// Bytes reserved for system use.
-    pub system_use_bytes: Vec<u8>,
+    pub system_use_bytes: Vec<u8>, // [u8; length - $directory_record_bytes_read]
 }
 
 /// A binary representation of a timestamp.
@@ -561,6 +738,30 @@ pub struct BinaryTimestamp {
     ///
     /// ISO9660 volumes only.
     pub gmt_offset_15min: Option<i8>,
+}
+impl BinaryTimestamp {
+    pub fn read(buf: &[u8], pos: &mut usize, is_high_sierra: bool) -> Self {
+        let year_since_1900 = ByteBufReadable::read(buf, pos);
+        let month = ByteBufReadable::read(buf, pos);
+        let day = ByteBufReadable::read(buf, pos);
+        let hour = ByteBufReadable::read(buf, pos);
+        let minute = ByteBufReadable::read(buf, pos);
+        let second = ByteBufReadable::read(buf, pos);
+        let gmt_offset_15min = if is_high_sierra {
+            None
+        } else {
+            Some(ByteBufReadable::read(buf, pos))
+        };
+        Self {
+            year_since_1900,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            gmt_offset_15min,
+        }
+    }
 }
 
 bitflags! {
