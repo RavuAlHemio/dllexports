@@ -1111,3 +1111,44 @@ pub struct PathTableRecord {
     // 5. directory_identifier
     // 6. reserved0
 }
+impl PathTableRecord {
+    pub fn read(buf: &[u8], pos: &mut usize, is_high_sierra: bool, is_big_endian: bool) -> Self {
+        if is_high_sierra {
+            let extent_location = ReadEndian::read(buf, pos, is_big_endian);
+            let extended_attribute_record_length = ByteBufReadable::read(buf, pos);
+            let directory_identifier_length: u8 = ByteBufReadable::read(buf, pos);
+            let parent_directory_number = ReadEndian::read(buf, pos, is_big_endian);
+            let directory_identifier = read_bytes_variable(buf, pos, directory_identifier_length.into());
+            let reserved0 = if directory_identifier_length % 2 == 0 {
+                None
+            } else {
+                Some(ByteBufReadable::read(buf, pos))
+            };
+            Self {
+                extended_attribute_record_length,
+                extent_location,
+                parent_directory_number,
+                directory_identifier,
+                reserved0,
+            }
+        } else {
+            let directory_identifier_length: u8 = ByteBufReadable::read(buf, pos);
+            let extended_attribute_record_length = ByteBufReadable::read(buf, pos);
+            let extent_location = ReadEndian::read(buf, pos, is_big_endian);
+            let parent_directory_number = ReadEndian::read(buf, pos, is_big_endian);
+            let directory_identifier = read_bytes_variable(buf, pos, directory_identifier_length.into());
+            let reserved0 = if directory_identifier_length % 2 == 0 {
+                None
+            } else {
+                Some(ByteBufReadable::read(buf, pos))
+            };
+            Self {
+                extended_attribute_record_length,
+                extent_location,
+                parent_directory_number,
+                directory_identifier,
+                reserved0,
+            }
+        }
+    }
+}

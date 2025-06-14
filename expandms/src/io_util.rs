@@ -122,6 +122,13 @@ impl<const N: usize> ByteBufReadable for [u8; N] {
 pub(crate) trait ReadEndian {
     fn read_be(buf: &[u8], pos: &mut usize) -> Self;
     fn read_le(buf: &[u8], pos: &mut usize) -> Self;
+    fn read(buf: &[u8], pos: &mut usize, is_big_endian: bool) -> Self where Self : Sized {
+        if is_big_endian {
+            Self::read_be(buf, pos)
+        } else {
+            Self::read_le(buf, pos)
+        }
+    }
 }
 macro_rules! impl_read_endian {
     ($type:ty) => {
