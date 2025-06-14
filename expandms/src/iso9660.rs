@@ -6,7 +6,7 @@ use std::io::{self, Read};
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
 
-use crate::io_util::{ByteBufReadable, ReadEndian};
+use crate::io_util::{read_bytes_variable, ByteBufReadable, ReadEndian};
 
 
 /// The number of bytes per logical sector.
@@ -704,6 +704,69 @@ pub struct DirectoryRecord {
     /// Bytes reserved for system use.
     pub system_use_bytes: Vec<u8>, // [u8; length - $directory_record_bytes_read]
 }
+impl DirectoryRecord {
+    pub fn read_from_volume_descriptor(buf: &[u8], pos: &mut usize, is_high_sierra: bool) -> Result<Self, io::Error> {
+        let length = ByteBufReadable::read(buf, pos);
+        if length != 34 {
+            // if it's in the volume descriptor, it has to be 34 bytes long
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
+        Ok(Self::read_after_length(buf, pos, length, is_high_sierra))
+    }
+
+    pub fn read(buf: &[u8], pos: &mut usize, is_high_sierra: bool) -> Self {
+        let length = ByteBufReadable::read(buf, pos);
+        Self::read_after_length(buf, pos, length, is_high_sierra)
+    }
+
+    fn read_after_length(buf: &[u8], pos: &mut usize, length: u8, is_high_sierra: bool) -> Self {
+        let start_pos = *pos;
+        let extended_attribute_record_length = ByteBufReadable::read(buf, pos);
+        let extent_location = ByteBufReadable::read(buf, pos);
+        let data_length = ByteBufReadable::read(buf, pos);
+        let recording_timestamp = BinaryTimestamp::read(buf, pos, is_high_sierra);
+        let file_flags = FileFlags::from_bits_retain(ByteBufReadable::read(buf, pos));
+        let reserved0 = if is_high_sierra {
+            Some(ByteBufReadable::read(buf, pos))
+        } else {
+            None
+        };
+        let interleave_unit_size = ByteBufReadable::read(buf, pos);
+        let interleave_gap_size = ByteBufReadable::read(buf, pos);
+        let volume_sequence_number = ByteBufReadable::read(buf, pos);
+        let file_identifier_length: u8 = ByteBufReadable::read(buf, pos);
+        let file_identifier = read_bytes_variable(buf, pos, file_identifier_length.into());
+        let reserved1 = if file_identifier_length % 2 == 0 {
+            Some(ByteBufReadable::read(buf, pos))
+        } else {
+            None
+        };
+
+        let bytes_read = *pos - start_pos;
+        let system_use_bytes = if usize::from(length) < bytes_read {
+            // uhh... okay... this shouldn't happen
+            Vec::with_capacity(0)
+        } else {
+            read_bytes_variable(buf, pos, usize::from(length) - bytes_read)
+        };
+        Self {
+            length,
+            extended_attribute_record_length,
+            extent_location,
+            data_length,
+            recording_timestamp,
+            file_flags,
+            reserved0,
+            interleave_unit_size,
+            interleave_gap_size,
+            volume_sequence_number,
+            file_identifier,
+            reserved1,
+            system_use_bytes,
+        }
+    }
+}
 
 /// A binary representation of a timestamp.
 ///
@@ -827,7 +890,7 @@ pub struct ExtendedAttributeRecord {
     /// Additional attributes pertaining to the record format.
     pub record_attributes: u8,
 
-    /// The length (or maximum length for variable-lenght records) of each record in the file.
+    /// The length (or maximum length for variable-length records) of each record in the file.
     pub record_length: EndianPair<u16>, // [u16; 2]
 
     /// The identifier of a system which can use relevant system-use attributes.
@@ -871,6 +934,73 @@ pub struct ExtendedAttributeRecord {
     ///
     /// ISO9660 only.
     pub escape_sequences: Option<Vec<u8>>, // 9660: [u8; escape_sequences_length], HS: ()
+}
+impl ExtendedAttributeRecord {
+    pub fn read(buf: &[u8], pos: &mut usize, is_high_sierra: bool) -> Self {
+        let owner_identification = ByteBufReadable::read(buf, pos);
+        let group_identification = ByteBufReadable::read(buf, pos);
+        let permissions = Permissions::from_bits_retain(u16::read_be(buf, pos));
+        let file_creation_timestamp = DigitTimestamp::read(buf, pos, is_high_sierra);
+        let file_modification_timestamp = DigitTimestamp::read(buf, pos, is_high_sierra);
+        let file_expiration_timestamp = DigitTimestamp::read(buf, pos, is_high_sierra);
+        let file_effective_timestamp = DigitTimestamp::read(buf, pos, is_high_sierra);
+        let record_format = ByteBufReadable::read(buf, pos);
+        let record_attributes = ByteBufReadable::read(buf, pos);
+        let record_length = ByteBufReadable::read(buf, pos);
+        let system_identifier = ByteBufReadable::read(buf, pos);
+        let system_use = ByteBufReadable::read(buf, pos);
+        let version = ByteBufReadable::read(buf, pos);
+        let escape_sequences_length: Option<u8> = if is_high_sierra {
+            None
+        } else {
+            Some(ByteBufReadable::read(buf, pos))
+        };
+        let reserved0 = if is_high_sierra {
+            ByteBufReadable::read(buf, pos)
+        } else {
+            let mut padded = [0u8; 65];
+            let value: [u8; 64] = ByteBufReadable::read(buf, pos);
+            padded[..64].copy_from_slice(&value);
+            padded
+        };
+        let parent_directory_number = if is_high_sierra {
+            Some(ByteBufReadable::read(buf, pos))
+        } else {
+            None
+        };
+        let application_use_length: EndianPair<u16> = ByteBufReadable::read(buf, pos);
+        let directory_record = if is_high_sierra {
+            Some(DirectoryRecord::read(buf, pos, is_high_sierra))
+        } else {
+            None
+        };
+        let application_use_data = read_bytes_variable(buf, pos, application_use_length.little_endian.into());
+        let escape_sequences = if let Some(esl) = escape_sequences_length {
+            Some(read_bytes_variable(buf, pos, esl.into()))
+        } else {
+            None
+        };
+        Self {
+            owner_identification,
+            group_identification,
+            permissions,
+            file_creation_timestamp,
+            file_modification_timestamp,
+            file_expiration_timestamp,
+            file_effective_timestamp,
+            record_format,
+            record_attributes,
+            record_length,
+            system_identifier,
+            system_use,
+            version,
+            reserved0,
+            parent_directory_number,
+            directory_record,
+            application_use_data,
+            escape_sequences,
+        }
+    }
 }
 
 bitflags! {

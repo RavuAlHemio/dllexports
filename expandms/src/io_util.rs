@@ -145,13 +145,13 @@ impl_read_endian!(u16);
 impl_read_endian!(u32);
 
 
-fn read_byte(buf: &[u8], pos: &mut usize) -> u8 {
-    let ret = buf[*pos];
-    *pos += 1;
-    ret
-}
-fn read_bytes<const N: usize>(buf: &[u8], pos: &mut usize) -> [u8; N] {
+pub(crate) fn read_bytes<const N: usize>(buf: &[u8], pos: &mut usize) -> [u8; N] {
     let ret = buf[*pos..*pos+N].try_into().unwrap();
     *pos += N;
+    ret
+}
+pub(crate) fn read_bytes_variable(buf: &[u8], pos: &mut usize, byte_count: usize) -> Vec<u8> {
+    let ret = buf[*pos..*pos+byte_count].to_vec();
+    *pos += byte_count;
     ret
 }
