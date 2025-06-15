@@ -1,5 +1,7 @@
 use std::io::{self, Read};
 
+use display_bytes::DisplayBytes;
+
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct BitReader<R: Read, const MSB_TO_LSB: bool> {
@@ -116,6 +118,13 @@ impl<const N: usize> ByteBufReadable for [u8; N] {
         let ret = buf[*pos..*pos+N].try_into().unwrap();
         *pos += N;
         ret
+    }
+}
+impl<const N: usize> ByteBufReadable for DisplayBytes<N> {
+    fn read(buf: &[u8], pos: &mut usize) -> Self {
+        let ret: [u8; N] = buf[*pos..*pos+N].try_into().unwrap();
+        *pos += N;
+        ret.into()
     }
 }
 

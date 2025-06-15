@@ -1,12 +1,14 @@
+mod cdrom;
 mod exe;
 mod fat;
 
 
 use std::collections::BTreeMap;
-use std::io::Cursor;
+use std::io::{Cursor, Seek, SeekFrom};
 
 use binms::ne::{self, SegmentEntryFlags};
 use binms::pe::{self, ExportData, KnownDataDirectoryEntry, OptionalHeader};
+use expandms::iso9660::VolumeDescriptor;
 
 use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
 use crate::formats::exe::{NewExecutable, PortableExecutable};
@@ -171,11 +173,24 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
         }
     }
 
+    // for CD-ROMs, we need to look a bit further
+    if data.len() >= 0x8006 {
+        if &data[0x8001..0x8006] == b"CD001" {
+            let mut reader = Cursor::new(data);
+            reader.seek(SeekFrom::Start(0x8000))?;
+            let vd = VolumeDescriptor::read(&mut reader, false)?;
+        }
+    } 
+    if data.len() >= 0x800E {
+        if &data[0x8009..0x800E] == b"CDROM" {
+            todo!("High Sierra");
+        }
+    }
+
     // TODO:
     // * SZDD (single-file container)
     // * CAB (multi-file container)
     // * WIM (m.f.c.)
-    // * ISO9660/Joliet (m.f.c.)
     // * possibly NTFS (m.f.c.)
 
     Ok(IdentifiedFile::Unidentified)

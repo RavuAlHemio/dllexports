@@ -4,6 +4,7 @@
 use std::io::{self, Read};
 
 use bitflags::bitflags;
+use display_bytes::DisplayBytes;
 use from_to_repr::from_to_other;
 
 use crate::io_util::{read_bytes_variable, ByteBufReadable, ReadEndian};
@@ -87,7 +88,7 @@ pub struct EndianPair<T> {
 impl<T: ReadEndian> ByteBufReadable for EndianPair<T> {
     fn read(buf: &[u8], pos: &mut usize) -> Self {
         let little_endian = <T as ReadEndian>::read_le(buf, pos);
-        let big_endian = <T as ReadEndian>::read_le(buf, pos);
+        let big_endian = <T as ReadEndian>::read_be(buf, pos);
         Self {
             little_endian,
             big_endian,
@@ -125,7 +126,7 @@ pub struct VolumeDescriptor {
     ///
     /// Equals [`ISO9660_IDENTIFIER_VALUE`] on ISO9660 volumes and [`HIGH_SIERRA_IDENTIFIER_VALUE`]
     /// on High Sierra volumes.
-    pub standard_identifier: [u8; 5],
+    pub standard_identifier: DisplayBytes<5>,
 
     /// Volume descriptor version.
     ///
@@ -141,16 +142,16 @@ pub struct VolumeDescriptor {
     ///
     /// May only contain characters from the A charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub system_identifier: [u8; 32],
+    pub system_identifier: DisplayBytes<32>,
 
     /// Volume identifier.
     ///
     /// May only contain characters from the D charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub volume_identifier: [u8; 32],
+    pub volume_identifier: DisplayBytes<32>,
 
     /// Reserved field.
-    pub reserved0: [u8; 8],
+    pub reserved0: DisplayBytes<8>,
 
     /// Volume space size.
     pub volume_space_size: EndianPair<u32>,
@@ -158,7 +159,7 @@ pub struct VolumeDescriptor {
     /// Escape sequences for the a1 and d1 character sets.
     ///
     /// Always zeroes on Primary/SFS volume descriptors.
-    pub escape_sequences: [u8; 32],
+    pub escape_sequences: DisplayBytes<32>,
 
     /// Number of volumes in this volume's volume set.
     pub volume_set_size: EndianPair<u16>, // [u16; 2]
@@ -231,25 +232,25 @@ pub struct VolumeDescriptor {
     ///
     /// May only contain characters from the D charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub volume_set_identifier: [u8; 128],
+    pub volume_set_identifier: DisplayBytes<128>,
 
     /// Publisher identifier.
     ///
     /// May only contain characters from the A charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub publisher_identifier: [u8; 128],
+    pub publisher_identifier: DisplayBytes<128>,
 
     /// Data preparer identifier.
     ///
     /// May only contain characters from the A charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub data_preparer_identifier: [u8; 128],
+    pub data_preparer_identifier: DisplayBytes<128>,
 
     /// Application identifier.
     ///
     /// May only contain characters from the A charset, which depends on the flavor (see
     /// [`VolumeDescriptor`] documentation).
-    pub application_identifier: [u8; 128],
+    pub application_identifier: DisplayBytes<128>,
 
     /// Copyright file identifier.
     ///
@@ -263,7 +264,7 @@ pub struct VolumeDescriptor {
     /// and must abide by the encoding of file identifiers (ISO9660 § 7.5, High Sierra § 10.5).
     ///
     /// 37 bytes long on ISO9660, 32 bytes long (right-padded with 0x00 on read) on High Sierra.
-    pub copyright_file_identifier: [u8; 37], // 9660: [u8; 37], HS: [u8; 32]
+    pub copyright_file_identifier: DisplayBytes<37>, // 9660: [u8; 37], HS: [u8; 32]
 
     /// Abstract file identifier.
     ///
@@ -277,7 +278,7 @@ pub struct VolumeDescriptor {
     /// and must abide by the encoding of file identifiers (ISO9660 § 7.5, High Sierra § 10.5).
     ///
     /// 37 bytes long on ISO9660, 32 bytes long (right-padded with 0x00 on read) on High Sierra.
-    pub abstract_file_identifier: [u8; 37], // 9660: [u8; 37], HS: [u8; 32]
+    pub abstract_file_identifier: DisplayBytes<37>, // 9660: [u8; 37], HS: [u8; 32]
 
     /// Bibliographic file identifier.
     ///
@@ -291,7 +292,7 @@ pub struct VolumeDescriptor {
     /// and must abide by the encoding of file identifiers (ISO9660 § 7.5).
     ///
     /// This field only exists on ISO9660 volumes.
-    pub bibliographic_file_identifier: Option<[u8; 37]>, // 9660: [u8; 37], HS: ()
+    pub bibliographic_file_identifier: Option<DisplayBytes<37>>, // 9660: [u8; 37], HS: ()
 
     /// Volume creation date and time.
     pub volume_creation_timestamp: DigitTimestamp, // 9660: [u8; 17], HS: [u8; 16]
@@ -314,12 +315,12 @@ pub struct VolumeDescriptor {
     pub reserved1: u8,
 
     /// Reserved for application use.
-    pub app_use: [u8; 512],
+    pub app_use: DisplayBytes<512>,
 
     /// Reserved field.
     ///
     /// 680 bytes on High Sierra, 653 bytes on ISO9660 volumes (right-padded with 0x00 on read).
-    pub reserved2: [u8; 680], // 9660: [u8; 653], HS: [u8; 680]
+    pub reserved2: DisplayBytes<680>, // 9660: [u8; 653], HS: [u8; 680]
 }
 impl VolumeDescriptor {
     pub fn read<R: Read>(reader: &mut R, is_high_sierra: bool) -> Result<Self, io::Error> {
@@ -378,7 +379,7 @@ impl VolumeDescriptor {
             let hs_ident: [u8; 32] = ByteBufReadable::read(&buf, &mut pos);
             let mut padded_ident = [0u8; 37];
             padded_ident[..32].copy_from_slice(&hs_ident);
-            padded_ident
+            padded_ident.into()
         } else {
             // full 37 bytes
             ByteBufReadable::read(&buf, &mut pos)
@@ -387,7 +388,7 @@ impl VolumeDescriptor {
             let hs_ident: [u8; 32] = ByteBufReadable::read(&buf, &mut pos);
             let mut padded_ident = [0u8; 37];
             padded_ident[..32].copy_from_slice(&hs_ident);
-            padded_ident
+            padded_ident.into()
         } else {
             // full 37 bytes
             ByteBufReadable::read(&buf, &mut pos)
@@ -410,7 +411,7 @@ impl VolumeDescriptor {
             let iso_ident: [u8; 653] = ByteBufReadable::read(&buf, &mut pos);
             let mut padded_ident = [0u8; 680];
             padded_ident[..653].copy_from_slice(&iso_ident);
-            padded_ident
+            padded_ident.into()
         };
         Ok(Self {
             vd_lbn,
@@ -477,25 +478,25 @@ bitflags! {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DigitTimestamp {
     /// The year, in ASCII digits from b"0001" to b"9999", or b"0000" if encoding the zero value.
-    pub year: [u8; 4],
+    pub year: DisplayBytes<4>,
 
     /// The month, in ASCII digits from b"01" to b"12", or b"00" if encoding the zero value.
-    pub month: [u8; 2],
+    pub month: DisplayBytes<2>,
 
     /// The day, in ASCII digits from b"01" to b"31", or b"00" if encoding the zero value.
-    pub day: [u8; 2],
+    pub day: DisplayBytes<2>,
 
     /// The hour, in ASCII digits from b"00" to b"23".
-    pub hour: [u8; 2],
+    pub hour: DisplayBytes<2>,
 
     /// The minute, in ASCII digits from b"00" to b"59".
-    pub minute: [u8; 2],
+    pub minute: DisplayBytes<2>,
 
     /// The second, in ASCII digits from b"00" to b"59".
-    pub second: [u8; 2],
+    pub second: DisplayBytes<2>,
 
     /// Hundredths of a second, in ASCII digits from b"00" to b"99".
-    pub centisecond: [u8; 2],
+    pub centisecond: DisplayBytes<2>,
 
     /// Offset from GMT in units of 15min, from -48 to 52.
     ///
@@ -550,7 +551,7 @@ pub struct PartitionDescriptor {
     ///
     /// Equals [`ISO9660_IDENTIFIER_VALUE`] on ISO9660 volumes and [`HIGH_SIERRA_IDENTIFIER_VALUE`]
     /// on High Sierra volumes.
-    pub standard_identifier: [u8; 5],
+    pub standard_identifier: DisplayBytes<5>,
 
     /// Volume descriptor version.
     ///
@@ -563,12 +564,12 @@ pub struct PartitionDescriptor {
     /// System identifier.
     ///
     /// May only contain a-characters.
-    pub system_identifier: [u8; 32],
+    pub system_identifier: DisplayBytes<32>,
 
     /// Volume partition identifier.
     ///
     /// May only contain d-characters.
-    pub partition_identifier: [u8; 32],
+    pub partition_identifier: DisplayBytes<32>,
 
     /// Location of this volume partition.
     pub partition_location: EndianPair<u32>,
@@ -579,7 +580,7 @@ pub struct PartitionDescriptor {
     /// Reserved field.
     ///
     /// 1960 bytes on ISO9660, 1952 bytes on High Sierra volumes (right-padded on read with 0x00).
-    pub reserved1: [u8; 1960], // 9660: [u8; 1960], HS: [u8; 1952]
+    pub reserved1: DisplayBytes<1960>, // 9660: [u8; 1960], HS: [u8; 1952]
 }
 impl PartitionDescriptor {
     pub fn read<R: Read>(reader: &mut R, is_high_sierra: bool) -> Result<Self, io::Error> {
@@ -604,7 +605,7 @@ impl PartitionDescriptor {
             let hs_ident: [u8; 1952] = ByteBufReadable::read(&buf, &mut pos);
             let mut padded_ident = [0u8; 1960];
             padded_ident[..1952].copy_from_slice(&hs_ident);
-            padded_ident
+            padded_ident.into()
         } else {
             ByteBufReadable::read(&buf, &mut pos)
         };
@@ -743,7 +744,8 @@ impl DirectoryRecord {
             None
         };
 
-        let bytes_read = *pos - start_pos;
+        // also count the length byte
+        let bytes_read = 1 + *pos - start_pos;
         let system_use_bytes = if usize::from(length) < bytes_read {
             // uhh... okay... this shouldn't happen
             Vec::with_capacity(0)

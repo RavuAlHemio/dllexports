@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
+use expandms::iso9660::VolumeDescriptor;
 
 use crate::data_mgmt::{IdentifiedFile, PathSequence};
 use crate::formats::interpret_file;
@@ -15,14 +16,56 @@ use crate::formats::interpret_file;
 
 #[derive(Parser)]
 enum ProgMode {
-    Expand(ExpandArgs),
-    FatHeader(InputFileOnlyArgs),
-    FatDirectory(InputFileAndOptIndexArgs),
-    FatData(InputFileAndIndexArgs),
-    MzHeader(InputFileOnlyArgs),
-    NeHeader(InputFileOnlyArgs),
+    /// Lower-level file interpretation commands.
+    #[command(subcommand)] Poke(PokeMode),
+
+    /// Attempts to ascertain what kind of a file this is.
     Interpret(InputFileOnlyArgs),
+
+    /// Scans a directory and attempts to recursively extract all exports from all exporting files.
     Scan(ScanArgs),
+}
+
+#[derive(Parser)]
+enum PokeMode {
+    /// Expands a file compressed with a Microsoft compression like KWAJ, SZDD or CAB.
+    Expand(ExpandArgs),
+
+    /// Obtains low-level information about a File Allocation Table file system.
+    #[command(subcommand)] Fat(PokeFatMode),
+
+    /// Obtains low-level information about DOS/Windows executable files.
+    #[command(subcommand)] Exe(PokeExeMode),
+
+    /// Obtains low-level information about ISO9660 CD images.
+    #[command(subcommand)] Cd(PokeCdMode),
+}
+
+#[derive(Parser)]
+enum PokeFatMode {
+    /// Outputs the header of a File Allocation Table file system.
+    FatHeader(InputFileOnlyArgs),
+
+    /// Outputs the entries of a directory in a File Allocation Table file system.
+    FatDirectory(InputFileAndOptIndexArgs),
+
+    /// Outputs the data contained in a file in a File Allocation Table file system.
+    FatData(InputFileAndIndexArgs),
+}
+
+#[derive(Parser)]
+enum PokeExeMode {
+    /// Outputs the header of an MZ (DOS executable) file.
+    MzHeader(InputFileOnlyArgs),
+
+    /// Outputs the header of an NE (16-bit Windows executable) file.
+    NeHeader(InputFileOnlyArgs),
+}
+
+#[derive(Parser)]
+enum PokeCdMode {
+    /// Outputs the first volume descriptor of an ISO9660 or similar image.
+    Vol(CdInputFileArgs),
 }
 
 #[derive(Parser)]
@@ -53,132 +96,164 @@ struct ScanArgs {
     pub dir: Option<PathBuf>,
 }
 
+#[derive(Parser)]
+struct CdInputFileArgs {
+    #[arg(short = 'H', long)] pub high_sierra: bool,
+    #[arg(short = 'n', long)] pub number: Option<u64>,
+    pub input_file: PathBuf,
+}
+
 
 fn main() {
     let mode = ProgMode::parse();
     match mode {
-        ProgMode::Expand(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
-            let mut output = Vec::new();
-            expandms::decompress(&mut input_file, &mut output)
-                .expect("failed to decompress");
-            std::fs::write(&args.output_file, &output)
-                .expect("failed to write output file");
-        },
-        ProgMode::FatHeader(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
+        ProgMode::Poke(poke_mode) => {
+            match poke_mode {
+                PokeMode::Expand(args) => {
+                    let mut input_file = File::open(&args.input_file)
+                        .expect("failed to open input file");
+                    let mut output = Vec::new();
+                    expandms::decompress(&mut input_file, &mut output)
+                        .expect("failed to decompress");
+                    std::fs::write(&args.output_file, &output)
+                        .expect("failed to write output file");
+                },
+                PokeMode::Fat(poke_fat_mode) => {
+                    match poke_fat_mode {
+                        PokeFatMode::FatHeader(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
 
-            // read header
-            let fat_header = FatHeader::read(&mut input_file)
-                .expect("failed to read FAT header");
-            println!("{:#?}", fat_header);
-            println!("{:?}", fat_header.variant());
+                            // read header
+                            let fat_header = FatHeader::read(&mut input_file)
+                                .expect("failed to read FAT header");
+                            println!("{:#?}", fat_header);
+                            println!("{:?}", fat_header.variant());
 
-            // skip over reserved sectors
-            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
-            input_file.seek(SeekFrom::Start(reserved_bytes))
-                .expect("failed to seek to start of allocation table");
+                            // skip over reserved sectors
+                            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
+                            input_file.seek(SeekFrom::Start(reserved_bytes))
+                                .expect("failed to seek to start of allocation table");
 
-            // read allocation table
-            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
-            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
-                .expect("failed to read in allocation table");
+                            // read allocation table
+                            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
+                            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
+                                .expect("failed to read in allocation table");
 
-            println!("{:?}", allocation_table);
-        },
-        ProgMode::FatDirectory(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
+                            println!("{:?}", allocation_table);
+                        },
+                        PokeFatMode::FatDirectory(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
 
-            // read header
-            let fat_header = FatHeader::read(&mut input_file)
-                .expect("failed to read FAT header");
+                            // read header
+                            let fat_header = FatHeader::read(&mut input_file)
+                                .expect("failed to read FAT header");
 
-            // skip over reserved sectors
-            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
-            input_file.seek(SeekFrom::Start(reserved_bytes))
-                .expect("failed to seek to start of allocation table");
+                            // skip over reserved sectors
+                            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
+                            input_file.seek(SeekFrom::Start(reserved_bytes))
+                                .expect("failed to seek to start of allocation table");
 
-            // read allocation table
-            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
-            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
-                .expect("failed to read in allocation table");
+                            // read allocation table
+                            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
+                            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
+                                .expect("failed to read in allocation table");
 
-            let mut dir_data = Vec::new();
-            if let Some(subdirectory_cluster_index) = args.index {
-                // read the chain of clusters
-                expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, subdirectory_cluster_index, &mut dir_data)
-                    .expect("failed to read cluster chain");
-            } else {
-                match fat_header.root_directory_location {
-                    RootDirectoryLocation::Sector(sector) => {
-                        let sector_count = u32::from(fat_header.max_root_dir_entries) * 32 / u32::from(fat_header.bytes_per_sector);
-                        for i in 0..sector_count {
-                            expandms::fat::read_sector_into(&mut input_file, &fat_header, sector + i, &mut dir_data)
-                                .expect("failed to read sector");
-                        }
-                    },
-                    RootDirectoryLocation::Cluster(cluster) => {
-                        expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, cluster, &mut dir_data)
-                            .expect("failed to read cluster chain");
-                    },
-                }
+                            let mut dir_data = Vec::new();
+                            if let Some(subdirectory_cluster_index) = args.index {
+                                // read the chain of clusters
+                                expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, subdirectory_cluster_index, &mut dir_data)
+                                    .expect("failed to read cluster chain");
+                            } else {
+                                match fat_header.root_directory_location {
+                                    RootDirectoryLocation::Sector(sector) => {
+                                        let sector_count = u32::from(fat_header.max_root_dir_entries) * 32 / u32::from(fat_header.bytes_per_sector);
+                                        for i in 0..sector_count {
+                                            expandms::fat::read_sector_into(&mut input_file, &fat_header, sector + i, &mut dir_data)
+                                                .expect("failed to read sector");
+                                        }
+                                    },
+                                    RootDirectoryLocation::Cluster(cluster) => {
+                                        expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, cluster, &mut dir_data)
+                                            .expect("failed to read cluster chain");
+                                    },
+                                }
+                            }
+
+                            let mut dir_cursor = Cursor::new(&dir_data);
+                            let max_entries = dir_data.len() / 32;
+                            for _ in 0..max_entries {
+                                let entry = expandms::fat::DirectoryEntry::read(&mut dir_cursor, fat_header.variant())
+                                    .expect("failed to read directory entry");
+                                if entry.file_name[0] == 0x00 {
+                                    // no more entries
+                                    break;
+                                }
+
+                                println!("{:#?}", entry);
+                            }
+                        },
+                        PokeFatMode::FatData(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+
+                            // read header
+                            let fat_header = FatHeader::read(&mut input_file)
+                                .expect("failed to read FAT header");
+
+                            // skip over reserved sectors
+                            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
+                            input_file.seek(SeekFrom::Start(reserved_bytes))
+                                .expect("failed to seek to start of allocation table");
+
+                            // read allocation table
+                            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
+                            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
+                                .expect("failed to read in allocation table");
+
+                            // read a chain of clusters
+                            let mut data = Vec::new();
+                            expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, args.index, &mut data)
+                                .expect("failed to read cluster chain");
+                            println!("{:?}", data);
+                        },
+                    }
+                },
+                PokeMode::Exe(poke_exe_mode) => {
+                    match poke_exe_mode {
+                        PokeExeMode::MzHeader(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+
+                            let mz = binms::mz::Executable::read(&mut input_file)
+                                .expect("failed to read MZ header");
+                            println!("{:#?}", mz);
+                        },
+                        PokeExeMode::NeHeader(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+
+                            let ne = binms::ne::Executable::read(&mut input_file)
+                                .expect("failed to read NE header");
+                            println!("{:#?}", ne);
+                        },
+                    }
+                },
+                PokeMode::Cd(poke_cd_mode) => {
+                    match poke_cd_mode {
+                        PokeCdMode::Vol(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            input_file.seek(SeekFrom::Start(0x8000))
+                                .expect("failed to seek to volume descriptor");
+                            let vd = VolumeDescriptor::read(&mut input_file, args.high_sierra)
+                                .expect("failed to read volume descriptor");
+                            println!("{:#?}", vd);
+                        },
+                    }
+                },
             }
-
-            let mut dir_cursor = Cursor::new(&dir_data);
-            let max_entries = dir_data.len() / 32;
-            for _ in 0..max_entries {
-                let entry = expandms::fat::DirectoryEntry::read(&mut dir_cursor, fat_header.variant())
-                    .expect("failed to read directory entry");
-                if entry.file_name[0] == 0x00 {
-                    // no more entries
-                    break;
-                }
-
-                println!("{:#?}", entry);
-            }
-        },
-        ProgMode::FatData(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
-
-            // read header
-            let fat_header = FatHeader::read(&mut input_file)
-                .expect("failed to read FAT header");
-
-            // skip over reserved sectors
-            let reserved_bytes = u64::from(fat_header.reserved_sector_count) * u64::from(fat_header.bytes_per_sector);
-            input_file.seek(SeekFrom::Start(reserved_bytes))
-                .expect("failed to seek to start of allocation table");
-
-            // read allocation table
-            let fat_length = usize::try_from(fat_header.sectors_per_fat).unwrap() * usize::from(fat_header.bytes_per_sector);
-            let allocation_table = AllocationTable::read(&mut input_file, fat_header.variant(), fat_length)
-                .expect("failed to read in allocation table");
-
-            // read a chain of clusters
-            let mut data = Vec::new();
-            expandms::fat::read_cluster_chain_into(&mut input_file, &fat_header, &allocation_table, args.index, &mut data)
-                .expect("failed to read cluster chain");
-            println!("{:?}", data);
-        },
-        ProgMode::MzHeader(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
-
-            let mz = binms::mz::Executable::read(&mut input_file)
-                .expect("failed to read MZ header");
-            println!("{:#?}", mz);
-        },
-        ProgMode::NeHeader(args) => {
-            let mut input_file = File::open(&args.input_file)
-                .expect("failed to open input file");
-
-            let ne = binms::ne::Executable::read(&mut input_file)
-                .expect("failed to read NE header");
-            println!("{:#?}", ne);
         },
         ProgMode::Interpret(args) => {
             let input_bytes = std::fs::read(&args.input_file)
