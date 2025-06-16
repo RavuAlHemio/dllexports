@@ -322,7 +322,6 @@ fn main() {
 
 
 fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
-    eprintln!("scan_file {:?}", parent_path_sequence);
     match interpret_file(data) {
         Ok(IdentifiedFile::MultiFileContainer(mfc)) => {
             // scan each child file

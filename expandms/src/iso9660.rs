@@ -721,7 +721,7 @@ impl DirectoryRecord {
         Self::read_after_length(buf, pos, length, is_high_sierra)
     }
 
-    fn read_after_length(buf: &[u8], pos: &mut usize, length: u8, is_high_sierra: bool) -> Self {
+    pub fn read_after_length(buf: &[u8], pos: &mut usize, length: u8, is_high_sierra: bool) -> Self {
         let start_pos = *pos;
         let extended_attribute_record_length = ByteBufReadable::read(buf, pos);
         let extent_location = ByteBufReadable::read(buf, pos);

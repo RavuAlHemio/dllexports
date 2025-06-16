@@ -4,11 +4,10 @@ mod fat;
 
 
 use std::collections::BTreeMap;
-use std::io::{Cursor, Seek, SeekFrom};
+use std::io::Cursor;
 
 use binms::ne::{self, SegmentEntryFlags};
 use binms::pe::{self, ExportData, KnownDataDirectoryEntry, OptionalHeader};
-use expandms::iso9660::VolumeDescriptor;
 
 use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
 use crate::formats::exe::{NewExecutable, PortableExecutable};
@@ -176,14 +175,14 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
     // for CD-ROMs, we need to look a bit further
     if data.len() >= 0x8006 {
         if &data[0x8001..0x8006] == b"CD001" {
-            let mut reader = Cursor::new(data);
-            reader.seek(SeekFrom::Start(0x8000))?;
-            let vd = VolumeDescriptor::read(&mut reader, false)?;
+            let cd = crate::formats::cdrom::Cdrom::new_from_iso9660_data(data)?;
+            return Ok(IdentifiedFile::MultiFileContainer(Box::new(cd)));
         }
     } 
     if data.len() >= 0x800E {
         if &data[0x8009..0x800E] == b"CDROM" {
-            todo!("High Sierra");
+            let cd = crate::formats::cdrom::Cdrom::new_from_high_sierra_data(data)?;
+            return Ok(IdentifiedFile::MultiFileContainer(Box::new(cd)));
         }
     }
 
