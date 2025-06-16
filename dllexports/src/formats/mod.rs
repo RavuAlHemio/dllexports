@@ -1,6 +1,7 @@
 mod cdrom;
 mod exe;
 mod fat;
+mod single_compression;
 
 
 use std::collections::BTreeMap;
@@ -12,6 +13,7 @@ use binms::pe::{self, ExportData, KnownDataDirectoryEntry, OptionalHeader};
 use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
 use crate::formats::exe::{NewExecutable, PortableExecutable};
 use crate::formats::fat::FatFileSystem;
+use crate::formats::single_compression::KwajOrSz;
 
 
 fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
@@ -153,9 +155,13 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
         }
     }
 
-    if data.starts_with(b"KWAJ") {
-        // single-file KWAJ container
-        todo!("KWAJ");
+    let is_kwaj_or_sz =
+        data.starts_with(b"KWAJ\x88\xF0\x27\xD1")
+        || data.starts_with(b"SZDD\x88\xF0\x27\x33")
+        || data.starts_with(b"SZ \x88\xF0\x27\x33\xD1");
+    if is_kwaj_or_sz {
+        // single-file KWAJ, SZDD or SZ container
+        return Ok(IdentifiedFile::SingleFileContainer(Box::new(KwajOrSz::new(data.to_vec()))));
     }
 
     if data.len() > 2 {

@@ -1,6 +1,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use expandms::DecompressionError;
+
 
 /// A sequence of paths, possibly through multiple file systems.
 ///
@@ -99,6 +101,7 @@ impl Symbol {
 pub enum Error {
     Io(std::io::Error),
     FileNotFound(PathBuf),
+    Decompression(DecompressionError),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,6 +110,8 @@ impl fmt::Display for Error {
                 => write!(f, "I/O error: {}", e),
             Self::FileNotFound(pb)
                 => write!(f, "file {:?} not found", pb),
+            Self::Decompression(e)
+                => write!(f, "decompression error: {}", e),
         }
     }
 }
@@ -115,9 +120,13 @@ impl std::error::Error for Error {
         match self {
             Self::Io(e) => Some(e),
             Self::FileNotFound(_) => None,
+            Self::Decompression(e) => Some(e),
         }
     }
 }
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self { Self::Io(value) }
+}
+impl From<DecompressionError> for Error {
+    fn from(value: DecompressionError) -> Self { Self::Decompression(value) }
 }
