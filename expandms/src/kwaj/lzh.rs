@@ -3,6 +3,8 @@
 
 use std::io::{self, Read, Write};
 
+use tracing::debug;
+
 use crate::error::DecompressionError;
 use crate::huff::HuffmanTree;
 use crate::io_util::BitReader;
@@ -152,7 +154,7 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
             Err(e) => return ignore_eof(Err(e)),
         };
 
-        println!("pos is {}", ring_buffer.position());
+        debug!("pos is {}", ring_buffer.position());
 
         if code > 0 {
             // match
@@ -170,14 +172,14 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
             let offset =
                 (usize::from(offset_top) << 6)
                 | usize::from(offset_bottom);
-            println!("offset is {}, len is {}", match_length, offset);
+            debug!("offset is {}, len is {}", match_length, offset);
             let mut match_offset = (ring_buffer.position() + RING_BUFFER_SIZE - offset) % RING_BUFFER_SIZE;
 
             // copy match_length bytes starting at match_offset
             // both into the output and into the current ring buffer position
             for _ in 0..match_length {
                 let match_buf = [ring_buffer.as_slice()[match_offset]];
-                println!("  I got {:02x}", match_buf[0]);
+                debug!("  I got {:02x}", match_buf[0]);
                 decompressed_writer.write_all(&match_buf)?;
                 ring_buffer.extend(match_buf);
                 match_offset = (match_offset + 1) % RING_BUFFER_SIZE;
@@ -190,7 +192,7 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
                 Ok(None) => return Ok(()),
                 Err(e) => return ignore_eof(Err(e)),
             };
-            println!("literal len is {}", literal_length);
+            debug!("literal len is {}", literal_length);
             if literal_length != 31 {
                 current_lookup = &match_run_lengths_after_short;
             }
@@ -200,7 +202,7 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
                     Ok(None) => return Ok(()),
                     Err(e) => return ignore_eof(Err(e)),
                 };
-                println!("  I got {:02x}", byte);
+                debug!("  I got {:02x}", byte);
                 decompressed_writer.write_all(&[byte])?;
                 ring_buffer.push(byte);
             }

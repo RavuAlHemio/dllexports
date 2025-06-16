@@ -7,3 +7,4 @@ edition = "2024"
 bitflags = "2.9.1"
 display-bytes = { path = "../display-bytes" }
 from-to-repr = { version = "0.2.2", features = ["from_to_other"] }
+tracing = { version = "0.1" }

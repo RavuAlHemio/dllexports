@@ -104,7 +104,22 @@ struct CdInputFileArgs {
 }
 
 
+fn set_up_tracing() {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::fmt;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+}
+
+
 fn main() {
+    set_up_tracing();
+
     let mode = ProgMode::parse();
     match mode {
         ProgMode::Poke(poke_mode) => {
