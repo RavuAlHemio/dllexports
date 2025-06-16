@@ -40,10 +40,16 @@ fn interpret_ne_pe(data: &[u8]) -> Option<Result<IdentifiedFile, Error>> {
         };
 
         // export table?
-        if let Some(export_table) = &portable_executable.optional_header {
-            if let OptionalHeader::Coff(coff) = &export_table {
+        if let Some(optional_header) = &portable_executable.optional_header {
+            if let OptionalHeader::Coff(coff) = &optional_header {
                 if let Some(windows) = &coff.optional_windows_header {
                     if let Some(export_directory_entry) = windows.known_data_directory_entry(KnownDataDirectoryEntry::ExportTable) {
+                        if export_directory_entry.address == 0 && export_directory_entry.size == 0 {
+                            // no exports
+                            return Some(Ok(IdentifiedFile::SymbolExporter(Box::new(PortableExecutable {
+                                exports: Vec::with_capacity(0),
+                            }))));
+                        }
                         let export_data_res = ExportData::read(
                             &mut cursor,
                             &export_directory_entry,
