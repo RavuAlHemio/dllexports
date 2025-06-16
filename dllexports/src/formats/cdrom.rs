@@ -33,11 +33,18 @@ impl Cdrom {
             reader.read_exact(&mut directory_bytes)?;
             let mut pos = 0;
 
-            loop {
+            while pos < directory_bytes.len() {
                 let length: u8 = directory_bytes[pos];
                 pos += 1;
                 if length == 0 {
-                    break;
+                    // hmm, maybe check the next logical sector?
+                    if pos % 0x800 == 1 {
+                        // we already are at the logical sector boundary and there's nothing there
+                        break;
+                    } else {
+                        pos = pos + (0x800 - pos % 0x800);
+                        continue;
+                    }
                 }
 
                 let dr = DirectoryRecord::read_after_length(&directory_bytes, &mut pos, length, is_high_sierra);
