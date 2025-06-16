@@ -47,6 +47,9 @@ impl FatHeader {
         let oem_name = header_buf[3..11].try_into().unwrap();
         let bytes_per_sector = u16::from_le_bytes(header_buf[11..13].try_into().unwrap());
         let sectors_per_cluster = header_buf[13];
+        if sectors_per_cluster == 0 {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
         let reserved_sector_count = u16::from_le_bytes(header_buf[14..16].try_into().unwrap());
         let fat_count = header_buf[16];
         let max_root_dir_entries = u16::from_le_bytes(header_buf[17..19].try_into().unwrap());
