@@ -4,7 +4,7 @@ use std::io::{Cursor, ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use expandms::fat::{
-    AllocationTable, Attributes, DirectoryEntry, DIRECTORY_ENTRY_SIZE_BYTES, FatHeader,
+    AllocationTable, Attributes, DirectoryEntry, DIRECTORY_ENTRY_SIZE_BYTES, FatEntry, FatHeader,
     read_cluster_chain_into, RootDirectoryLocation,
 };
 
@@ -35,6 +35,17 @@ impl FatFileSystem {
             header.variant(),
             header.fat_bytes(),
         )?;
+
+        let Some(first_fat_entry) = fat.entries.get(0) else {
+            return Err(Error::Io(ErrorKind::InvalidData.into()));
+        };
+        match first_fat_entry {
+            FatEntry::MediaType(_) => {},
+            _ => {
+                // not actually FAT
+                return Err(Error::Io(ErrorKind::InvalidData.into()));
+            },
+        }
 
         // find and read root directory
         let root_directory_bytes = match header.root_directory_location {
