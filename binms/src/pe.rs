@@ -73,7 +73,14 @@ impl Executable {
             let entry = SectionTableEntry::read(reader)?;
             section_table_entries.push(entry);
         }
-        let section_table = SectionTable::from(section_table_entries);
+        let mut section_table = SectionTable::from(section_table_entries);
+        if let Some(oh) = optional_header.as_ref() {
+            if let OptionalHeader::Coff(coff) = oh {
+                if let Some(wh) = coff.optional_windows_header.as_ref() {
+                    section_table.fix_missing_virtual_sizes(wh.section_alignment);
+                }
+            }
+        }
 
         Ok(Self {
             mz,
@@ -605,6 +612,40 @@ pub struct SectionTable {
 impl SectionTable {
     pub fn as_entries(&self) -> &[SectionTableEntry] {
         &self.entries
+    }
+
+    pub fn fix_missing_virtual_sizes(&mut self, mut section_alignment: u32) {
+        // first, sort by virtual position, then by virtual size, then by name
+        self.entries.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size, e.name));
+
+        // prevent division by zero
+        if section_alignment == 0 {
+            section_alignment = 1;
+        }
+
+        // next, run through them
+        for i in 0..self.entries.len() {
+            let entry = &self.entries[i];
+            let next_entry_opt = self.entries.get(i + 1);
+            if entry.virtual_size != 0 {
+                // good, not much to do here
+                continue;
+            }
+
+            // round raw size up to alignment to obtain provisional virtual size
+            let mut new_virtual_size = ((entry.raw_data_size + (section_alignment - 1)) / section_alignment) * section_alignment;
+
+            // make sure that doesn't overlap with the next section
+            if let Some(next_entry) = next_entry_opt {
+                if entry.virtual_address + new_virtual_size > next_entry.virtual_address {
+                    new_virtual_size = next_entry.virtual_address - entry.virtual_address;
+                }
+            }
+
+            // FIXME: additional conflict resolution?
+
+            (&mut self.entries[i]).virtual_size = new_virtual_size;
+        }
     }
 
     pub fn has_overlap(&self) -> bool {
