@@ -612,12 +612,16 @@ impl SectionTable {
             return false;
         }
 
-        let mut entry_references: Vec<&SectionTableEntry> = self.entries.iter().collect();
+        let mut virtual_entry_references: Vec<&SectionTableEntry> = self.entries.iter().collect();
+        let mut raw_entry_references: Vec<&SectionTableEntry> = self.entries
+            .iter()
+            .filter(|er| !er.characteristics.contains(SectionCharacteristics::CONTAINS_UNINITIALIZED_DATA))
+            .collect();
 
         {
             // check overlap of raw (in-file) structure
-            entry_references.sort_unstable_by_key(|e| (e.raw_data_pointer, e.raw_data_size));
-            let mut iterator = entry_references.iter();
+            raw_entry_references.sort_unstable_by_key(|e| (e.raw_data_pointer, e.raw_data_size));
+            let mut iterator = raw_entry_references.iter();
             let mut prev_entry = iterator.next().unwrap();
             while let Some(entry) = iterator.next() {
                 if prev_entry.raw_data_pointer + prev_entry.raw_data_size > entry.raw_data_pointer {
@@ -630,8 +634,8 @@ impl SectionTable {
 
         {
             // check overlap of virtual (in-memory) structure
-            entry_references.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size));
-            let mut iterator = entry_references.iter();
+            virtual_entry_references.sort_unstable_by_key(|e| (e.virtual_address, e.virtual_size));
+            let mut iterator = virtual_entry_references.iter();
             let mut prev_entry = iterator.next().unwrap();
             while let Some(entry) = iterator.next() {
                 if prev_entry.virtual_address + prev_entry.virtual_size > entry.virtual_address {
