@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, io::{self, Read, Seek, SeekFrom}};
 
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
+use tracing::debug;
 
 use crate::read_nul_terminated_ascii_string;
 
@@ -626,6 +627,13 @@ impl SectionTable {
             while let Some(entry) = iterator.next() {
                 if prev_entry.raw_data_pointer + prev_entry.raw_data_size > entry.raw_data_pointer {
                     // overlap!
+                    debug!(
+                        "raw overlap: previous address {:#010X} + previous size {:#010X} = {:#010X} > next address {:#010X}",
+                        prev_entry.raw_data_pointer,
+                        prev_entry.raw_data_size,
+                        prev_entry.raw_data_pointer + prev_entry.raw_data_size,
+                        entry.raw_data_pointer,
+                    );
                     return true;
                 }
                 prev_entry = entry;
@@ -640,6 +648,13 @@ impl SectionTable {
             while let Some(entry) = iterator.next() {
                 if prev_entry.virtual_address + prev_entry.virtual_size > entry.virtual_address {
                     // overlap!
+                    debug!(
+                        "virtual overlap: previous address {:#010X} + previous size {:#010X} = {:#010X} > next address {:#010X}",
+                        prev_entry.virtual_address,
+                        prev_entry.virtual_size,
+                        prev_entry.virtual_address + prev_entry.virtual_size,
+                        entry.virtual_address,
+                    );
                     return true;
                 }
                 prev_entry = entry;
