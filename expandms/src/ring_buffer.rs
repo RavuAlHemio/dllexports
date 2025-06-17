@@ -38,4 +38,20 @@ impl<T: Copy, const SIZE: usize> RingBuffer<T, SIZE> {
             self.push(item);
         }
     }
+
+    pub fn recall(&mut self, mut lookback: usize, length: usize) -> Vec<T> {
+        let mut ret = Vec::with_capacity(length);
+        lookback %= SIZE;
+        if lookback > self.position {
+            // we have to wrap around at 0
+            lookback = SIZE - (lookback - self.position);
+        }
+        for _ in 0..length {
+            let b = self.buffer[lookback];
+            ret.push(b);
+            self.push(b);
+            lookback = (lookback + 1) % SIZE;
+        }
+        ret
+    }
 }

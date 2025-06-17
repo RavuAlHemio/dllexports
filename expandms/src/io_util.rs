@@ -62,6 +62,16 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
         self.byte_picked_apart = None;
     }
 }
+impl<R: Read> BitReader<R, true> {
+    pub fn new_msb_to_lsb(byte_reader: R) -> Self {
+        Self::new(byte_reader)
+    }
+}
+impl<R: Read> BitReader<R, false> {
+    pub fn new_lsb_to_msb(byte_reader: R) -> Self {
+        Self::new(byte_reader)
+    }
+}
 
 macro_rules! impl_read_n_bits {
     ($name:ident, $bit_count:expr, $ret_type:ty) => {
@@ -84,6 +94,17 @@ macro_rules! impl_read_n_bits {
         }
     };
 }
+macro_rules! impl_read_n_bytes {
+    ($name:ident, $byte_count:expr, $ret_type:ty, $convert_func:ident) => {
+        pub fn $name(&mut self) -> Result<$ret_type, io::Error> {
+            let mut buf = [0u8; $byte_count];
+            for b in &mut buf {
+                *b = self.read_u8()?;
+            }
+            Ok(<$ret_type>::$convert_func(buf))
+        }
+    };
+}
 
 impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     impl_read_n_bits!(read_u2, 2, u8);
@@ -92,7 +113,29 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     impl_read_n_bits!(read_u5, 5, u8);
     impl_read_n_bits!(read_u6, 6, u8);
     impl_read_n_bits!(read_u7, 7, u8);
-    impl_read_n_bits!(read_u8, 8, u8);
+    impl_read_n_bits!(read_u8_bitwise, 8, u8);
+
+    pub fn read_u8(&mut self) -> Result<u8, io::Error> {
+        // optimization: are we at a byte boundary?
+        if self.bit_index == 0 {
+            // yes; just read the next byte from the underlying reader
+            let mut buf = [0u8];
+            self.byte_reader.read_exact(&mut buf)?;
+            Ok(buf[0])
+        } else {
+            self.read_u8_bitwise()
+        }
+    }
+
+    impl_read_n_bytes!(read_u16_le, 2, u16, from_le_bytes);
+    impl_read_n_bytes!(read_u16_be, 2, u16, from_be_bytes);
+
+    pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
+        for b in buf {
+            *b = self.read_u8()?;
+        }
+        Ok(())
+    }
 }
 
 pub(crate) trait ByteBufReadable {
