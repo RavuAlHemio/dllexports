@@ -1,7 +1,7 @@
 mod error;
 pub mod fat;
 mod huff;
-mod inflate;
+pub mod inflate;
 mod io_util;
 pub mod iso9660;
 mod kwaj;

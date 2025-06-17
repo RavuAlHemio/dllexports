@@ -111,7 +111,7 @@ const DEFINITION_CODE_LENGTH_ORDER: [usize; 19] = [
 ];
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     Io(io::Error),
     BuildingDefinitionTree,
     DecodingDefinitionValue,
@@ -218,15 +218,15 @@ impl BaseCountAndExtraBits {
     }
 
     pub fn obtain_count<R: Read, const MSB_TO_LSB: bool>(&self, reader: &mut BitReader<&mut R, MSB_TO_LSB>) -> Result<usize, io::Error> {
-        let mut count = self.base_count;
-        for _ in 0..self.extra_bits {
-            count <<= 1;
+        let mut extra_bits_value = 0;
+        for i in 0..self.extra_bits {
             let bit = reader.read_bit_strict()?;
+            debug!("extra bit: {}", if bit { "1" } else { "0" });
             if bit {
-                count |= 1;
+                extra_bits_value |= 1 << i;
             }
         }
-        Ok(count)
+        Ok(self.base_count + extra_bits_value)
     }
 }
 
@@ -261,19 +261,20 @@ impl HuffmanCanonicalizable for DefinitionValue {
 }
 
 
-pub struct Inflater<'r, R: Read, const MSB_TO_LSB: bool> {
-    reader: BitReader<&'r mut R, MSB_TO_LSB>,
+pub struct Inflater<'r, R: Read> {
+    reader: BitReader<&'r mut R, false>,
     lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
 }
-impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
-    pub fn new(reader: BitReader<&'r mut R, MSB_TO_LSB>) -> Self {
+impl<'r, R: Read> Inflater<'r, R> {
+    pub fn new(reader: &'r mut R) -> Self {
+        let reader = BitReader::new(reader);
         Self {
             reader,
             lookback: RingBuffer::new(0x00),
         }
     }
 
-    fn inflate_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
+    pub fn inflate_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
         let is_final = self.reader.read_bit_strict()?;
         if is_final {
             debug!("is final");
@@ -332,14 +333,16 @@ impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
                         .map_err(|_| Error::BuildingDefinitionTree)?;
 
                     let total_code_count = usize::from(value_code_count) + usize::from(distance_code_count);
+                    debug!("definition: {} values + {} distances = {} codes", value_code_count, distance_code_count, total_code_count);
                     let mut code_lengths = Vec::with_capacity(total_code_count);
                     let mut previous_code_length = None;
-                    for _ in 0..total_code_count {
+                    while code_lengths.len() < total_code_count {
                         let definition_value = definition_tree.decode_one_from_bit_reader(&mut self.reader)
                             .map_err(|_| Error::DecodingDefinitionValue)?
                             .ok_or_else(|| Error::Io(io::ErrorKind::InvalidData.into()))?;
                         match definition_value {
                             DefinitionValue::CodeLength(code_length) => {
+                                debug!("definition value: code length {}", code_length);
                                 code_lengths.push(usize::from(*code_length));
                                 previous_code_length = Some(*code_length);
                             },
@@ -347,6 +350,7 @@ impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
                                 if let Some(pcl) = previous_code_length {
                                     // find out how often: read 2 bits and add 3
                                     let copy_count = self.reader.read_u2()? + 3;
+                                    debug!("definition value: previous code length {} times", copy_count);
                                     for _ in 0..copy_count {
                                         code_lengths.push(usize::from(pcl));
                                     }
@@ -359,6 +363,7 @@ impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
                                 // append zero
                                 // find out how often: read 3 bits and add 3
                                 let zero_count = self.reader.read_u3()? + 3;
+                                debug!("definition value: {} zeroes (short)", zero_count);
                                 for _ in 0..zero_count {
                                     code_lengths.push(0);
                                 }
@@ -367,6 +372,7 @@ impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
                                 // append more zero
                                 // find out how often: read 7 bits and add 11
                                 let zero_count = self.reader.read_u7()? + 11;
+                                debug!("definition value: {} zeroes (long)", zero_count);
                                 for _ in 0..zero_count {
                                     code_lengths.push(0);
                                 }
@@ -395,23 +401,36 @@ impl<'r, R: Read, const MSB_TO_LSB: bool> Inflater<'r, R, MSB_TO_LSB> {
                     match value {
                         InflateValue::EndOfBlock => {
                             // done
+                            debug!("inflate value: end of block");
                             break;
                         },
                         InflateValue::Literal(l) => {
+                            let c = if *l >= b' ' && *l <= b'~' {
+                                char::from_u32(u32::from(*l)).unwrap()
+                            } else {
+                                ' '
+                            };
+                            debug!("inflate value: literal byte {} {:#04X}", c, l);
                             self.lookback.push(*l);
                             dest_buffer.push(*l);
                         },
                         InflateValue::Lookback(length_index) => {
                             let length_value = LENGTH_VALUES[*length_index];
                             let length = length_value.obtain_count(&mut self.reader)?;
+                            debug!("inflate value decoding: look back for {} bytes", length);
 
                             let distance_index = distance_tree.decode_one_from_bit_reader(&mut self.reader)
                                 .map_err(|_| Error::ReadingDistance)?
                                 .ok_or_else(|| Error::Io(io::ErrorKind::UnexpectedEof.into()))?;
+                            debug!("inflate value decoding: look back to distance index {}", distance_index);
                             let distance_value = DISTANCE_VALUES[*distance_index];
+                            debug!("inflate value decoding: look back to distance value {:?}", distance_value);
                             let distance = distance_value.obtain_count(&mut self.reader)?;
 
+                            debug!("inflate value: look back {} bytes for {} bytes", distance, length);
+
                             let mut buf = self.lookback.recall(distance, length);
+                            debug!("inflate value addendum: lookback buffer: {:?}", buf);
                             dest_buffer.append(&mut buf);
                         },
                         InflateValue::Invalid(_) => return Err(Error::InvalidValue),
@@ -434,7 +453,6 @@ mod tests {
     use super::Inflater;
     use std::io::Cursor;
     use tracing_test::traced_test;
-    use crate::io_util::BitReader;
 
     #[test]
     #[traced_test]
@@ -445,8 +463,7 @@ mod tests {
         let plaintext = b"able cable fable gable sable table arable doable enable liable stable unable usable viable";
 
         let mut deflated_reader = Cursor::new(deflated);
-        let deflated_bit_reader = BitReader::new_lsb_to_msb(&mut deflated_reader);
-        let mut inflater = Inflater::new(deflated_bit_reader);
+        let mut inflater = Inflater::new(&mut deflated_reader);
 
         let mut output = Vec::new();
         loop {

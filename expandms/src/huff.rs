@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Read};
 
+use tracing::debug;
+
 use crate::io_util::BitReader;
 
 
@@ -138,6 +140,7 @@ impl<T> HuffmanTree<T> {
     ) -> Result<Option<&T>, io::Error> {
         let mut current_node = &self.root_node;
         let mut first_iteration = true;
+        let mut branching = Vec::new();
         loop {
             let take_true_branch = match bit_reader.read_bit() {
                 Ok(Some(b)) => b,
@@ -148,6 +151,13 @@ impl<T> HuffmanTree<T> {
                 },
                 Err(e) => return Err(e),
             };
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                if take_true_branch {
+                    branching.push(b'1');
+                } else {
+                    branching.push(b'0');
+                }
+            }
             first_iteration = false;
 
             let branch_taken = if take_true_branch {
@@ -161,6 +171,9 @@ impl<T> HuffmanTree<T> {
                 },
                 HuffmanNode::Leaf(l) => {
                     // we've reached the bottom
+                    debug!("Huffman: took branches {}", std::str::from_utf8(&branching).unwrap());
+                    branching.reverse();
+                    debug!("Huffman: in reverse:   {}", std::str::from_utf8(&branching).unwrap());
                     return Ok(Some(&l.value));
                 },
             }

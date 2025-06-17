@@ -3,11 +3,12 @@ mod formats;
 
 
 use std::fs::{read_dir, File};
-use std::io::{Cursor, Seek, SeekFrom};
+use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
+use expandms::inflate::Inflater;
 use expandms::iso9660::VolumeDescriptor;
 
 use crate::data_mgmt::{IdentifiedFile, PathSequence};
@@ -39,6 +40,9 @@ enum PokeMode {
 
     /// Obtains low-level information about ISO9660 CD images.
     #[command(subcommand)] Cd(PokeCdMode),
+
+    /// Decompresses DEFLATE-compressed data.
+    Inflate(ExpandArgs),
 }
 
 #[derive(Parser)]
@@ -266,6 +270,24 @@ fn main() {
                                 .expect("failed to read volume descriptor");
                             println!("{:#?}", vd);
                         },
+                    }
+                },
+                PokeMode::Inflate(args) => {
+                    let mut input_file = File::open(&args.input_file)
+                        .expect("failed to open input file");
+                    let mut inflater = Inflater::new(&mut input_file);
+                    let mut output = Vec::new();
+                    let mut output_file = File::create(&args.output_file)
+                        .expect("failed to create output file");
+                    loop {
+                        output.clear();
+                        let last_block = inflater.inflate_block(&mut output)
+                            .expect("failed to inflate block");
+                        output_file.write_all(&mut output)
+                            .expect("failed to output inflated block to file");
+                        if last_block {
+                            break;
+                        }
                     }
                 },
             }
