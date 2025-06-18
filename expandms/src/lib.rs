@@ -1,3 +1,4 @@
+pub mod cab;
 mod error;
 pub mod fat;
 mod huff;
