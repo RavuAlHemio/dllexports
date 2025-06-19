@@ -1,3 +1,22 @@
+//! Reading the Microsoft Cabinet format.
+//!
+//! Conceptually, cabinet files are subdivided into folders (which are unrelated to file system
+//! directories) which are further subdivided into data blocks. A folder, in its uncompressed state,
+//! is a concatenation of all files within it, which is then subdivided into data blocks, which are
+//! then optionally compressed. There tends to be some carry-over in the compression mechanism
+//! between data blocks within a folder; for example, with MSZIP (DEFLATE) compression, the lookback
+//! buffer (or dictionary, in zlib parlance) is preserved between data blocks of the same folder.
+//! Thus, decisions about compression are made on the folder level, not on the data block level.
+//!
+//! Files within a cabinet file are a reference to a folder, an uncompressed byte position and an
+//! uncompressed byte length. It might therefore be necessary to decompress the whole folder until
+//! the requested file is reached.
+//!
+//! The payload may also be subdivided into multiple cabinet files; a file may span multiple cabinet
+//! files (but only one folder per cabinet file). `expandms` probably won't support extracting
+//! spanned files anytime soon, however.
+
+
 use std::io::{self, Read};
 
 use bitflags::bitflags;
