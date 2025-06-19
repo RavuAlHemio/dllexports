@@ -274,6 +274,14 @@ impl<'r, R: Read> Inflater<'r, R> {
         }
     }
 
+    pub fn lookback(&self) -> &RingBuffer<u8, MAX_LOOKBACK_DISTANCE> {
+        &self.lookback
+    }
+
+    pub fn set_lookback(&mut self, lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>) {
+        self.lookback = lookback;
+    }
+
     pub fn inflate_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
         let is_final = self.reader.read_bit_strict()?;
         if is_final {
