@@ -139,6 +139,7 @@ version = "0.1.0"
 dependencies = [
  "binms",
  "clap",
+ "display-bytes",
  "expandms",
  "tracing",
  "tracing-subscriber",

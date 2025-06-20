@@ -102,6 +102,8 @@ pub enum Error {
     Io(std::io::Error),
     FileNotFound(PathBuf),
     Decompression(DecompressionError),
+    InvalidUtf8FileName(Vec<u8>),
+    SpannedFile,
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -112,6 +114,10 @@ impl fmt::Display for Error {
                 => write!(f, "file {:?} not found", pb),
             Self::Decompression(e)
                 => write!(f, "decompression error: {}", e),
+            Self::InvalidUtf8FileName(e)
+                => write!(f, "invalid UTF-8 file name: {:?}", e),
+            Self::SpannedFile
+                => write!(f, "file spans multiple containers"),
         }
     }
 }
@@ -121,6 +127,8 @@ impl std::error::Error for Error {
             Self::Io(e) => Some(e),
             Self::FileNotFound(_) => None,
             Self::Decompression(e) => Some(e),
+            Self::InvalidUtf8FileName(_) => None,
+            Self::SpannedFile => None,
         }
     }
 }
@@ -129,4 +137,7 @@ impl From<std::io::Error> for Error {
 }
 impl From<DecompressionError> for Error {
     fn from(value: DecompressionError) -> Self { Self::Decompression(value) }
+}
+impl From<expandms::inflate::Error> for Error {
+    fn from(value: expandms::inflate::Error) -> Self { Self::Decompression(DecompressionError::Inflate(value)) }
 }

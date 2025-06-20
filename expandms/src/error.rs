@@ -10,6 +10,7 @@ pub enum DecompressionError {
     UnexpectedHuffmanSymbolCount { symbol_count: usize },
     RelativeValueUnderflow,
     DataOffsetWithinHeader,
+    Inflate(crate::inflate::Error),
 }
 impl fmt::Display for DecompressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -28,6 +29,8 @@ impl fmt::Display for DecompressionError {
                 => write!(f, "a relative value would underflow 0"),
             Self::DataOffsetWithinHeader
                 => write!(f, "data offset points to a location within the header"),
+            Self::Inflate(e)
+                => write!(f, "Inflate error: {}", e),
         }
     }
 }
@@ -41,6 +44,7 @@ impl std::error::Error for DecompressionError {
             Self::UnexpectedHuffmanSymbolCount { .. } => None,
             Self::RelativeValueUnderflow => None,
             Self::DataOffsetWithinHeader => None,
+            Self::Inflate(e) => Some(e),
         }
     }
 }
@@ -49,4 +53,7 @@ impl From<std::io::Error> for DecompressionError {
 }
 impl From<crate::huff::HuffmanConstructionError> for DecompressionError {
     fn from(value: crate::huff::HuffmanConstructionError) -> Self { Self::Huffman(value) }
+}
+impl From<crate::inflate::Error> for DecompressionError {
+    fn from(value: crate::inflate::Error) -> Self { Self::Inflate(value) }
 }

@@ -1,3 +1,4 @@
+mod cab;
 mod cdrom;
 mod exe;
 mod fat;
@@ -11,6 +12,7 @@ use binms::ne::{self, SegmentEntryFlags};
 use binms::pe::{self, ExportData, KnownDataDirectoryEntry, OptionalHeader};
 
 use crate::data_mgmt::{Error, IdentifiedFile, Symbol};
+use crate::formats::cab::Cabinet;
 use crate::formats::exe::{NewExecutable, PortableExecutable};
 use crate::formats::fat::FatFileSystem;
 use crate::formats::single_compression::KwajOrSz;
@@ -198,8 +200,12 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
         }
     }
 
+    if data.starts_with(b"MSCF") {
+        let cab = Cabinet::new(data)?;
+        return Ok(IdentifiedFile::MultiFileContainer(Box::new(cab)));
+    }
+
     // TODO:
-    // * SZDD (single-file container)
     // * CAB (multi-file container)
     // * WIM (m.f.c.)
     // * possibly NTFS (m.f.c.)

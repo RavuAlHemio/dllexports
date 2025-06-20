@@ -6,7 +6,7 @@ pub mod inflate;
 mod io_util;
 pub mod iso9660;
 mod kwaj;
-mod ring_buffer;
+pub mod ring_buffer;
 mod szdd;
 
 

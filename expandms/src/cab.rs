@@ -17,7 +17,7 @@
 //! spanned files anytime soon, however.
 
 
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
@@ -281,7 +281,7 @@ bitflags! {
         const ARCHIVE = 0x0020;
 
         const EXECUTE = 0x0040;
-        const UTF_NAME = 0x0080;
+        const UTF8_NAME = 0x0080;
     }
 }
 
@@ -292,9 +292,10 @@ pub struct CabData {
     pub compressed_byte_count: u16,
     pub uncompressed_byte_count: u16,
     pub reserved_data: Vec<u8>, // [u8; header.data_reserved_length.unwrap_or(0)]
+    pub data_offset: usize,
 }
 impl CabData {
-    pub fn read<R: Read>(reader: &mut R, header: &CabHeader) -> Result<Self, io::Error> {
+    pub fn read<R: Read + Seek>(reader: &mut R, header: &CabHeader) -> Result<Self, io::Error> {
         let mut fixed_part_buf = [0u8; 8];
         reader.read_exact(&mut fixed_part_buf)?;
         let mut pos = 0;
@@ -305,11 +306,14 @@ impl CabData {
         let mut reserved_data = vec![0u8; header.data_reserved_length.unwrap_or(0).into()];
         reader.read_exact(&mut reserved_data)?;
 
+        let data_offset = reader.seek(io::SeekFrom::Current(0))?.try_into().unwrap();
+
         Ok(Self {
             checksum,
             compressed_byte_count,
             uncompressed_byte_count,
             reserved_data,
+            data_offset,
         })
     }
 }

@@ -7,9 +7,11 @@ use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use display_bytes::DisplayBytesSlice;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
 use expandms::inflate::Inflater;
 use expandms::iso9660::VolumeDescriptor;
+use tracing::debug;
 
 use crate::data_mgmt::{IdentifiedFile, PathSequence};
 use crate::formats::interpret_file;
@@ -375,7 +377,14 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
                 child_path_sequence.push(&file);
 
                 let file_data = match mfc.read_file(&file) {
-                    Ok(fd) => fd,
+                    Ok(fd) => {
+                        if fd.len() < 24 {
+                            debug!("{}", DisplayBytesSlice::from(fd.as_slice()));
+                        } else {
+                            debug!("{}...{}", DisplayBytesSlice::from(&fd[..16]), DisplayBytesSlice::from(&fd[fd.len()-16..]));
+                        }
+                        fd
+                    },
                     Err(e) => {
                         eprintln!("failed to obtain {:?}: {}", child_path_sequence, e);
                         continue;
