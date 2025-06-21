@@ -6,7 +6,6 @@ use expandms::cab::{CabData, CabFolder, CabHeader, CompressionType, FileInCab, F
 use expandms::inflate::Inflater;
 use expandms::ring_buffer::RingBuffer;
 use expandms::DecompressionError;
-use tracing::debug;
 
 use crate::data_mgmt::MultiFileContainer;
 
