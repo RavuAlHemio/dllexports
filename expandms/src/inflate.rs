@@ -6,6 +6,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::sync::LazyLock;
 
+use display_bytes::HexBytesSlice;
 use tracing::debug;
 
 use crate::huff::{HuffmanCanonicalizable, HuffmanTree};
@@ -438,7 +439,7 @@ impl<'r, R: Read> Inflater<'r, R> {
                             debug!("inflate value: look back {} bytes for {} bytes", distance, length);
 
                             let mut buf = self.lookback.recall(distance, length);
-                            debug!("inflate value addendum: lookback buffer: {:?}", buf);
+                            debug!("inflate value addendum: lookback buffer: {}", HexBytesSlice::from(buf.as_slice()));
                             dest_buffer.append(&mut buf);
                         },
                         InflateValue::Invalid(_) => return Err(Error::InvalidValue),

@@ -193,3 +193,44 @@ impl<'a> Index<usize> for DisplayBytesSlice<'a> {
         &self.0[index]
     }
 }
+
+
+
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct HexBytesSlice<'a>(&'a [u8]);
+impl<'a> fmt::Display for HexBytesSlice<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        let mut first_loop = true;
+        for &b in self.0 {
+            if first_loop {
+                first_loop = false;
+            } else {
+                write!(f, ", ")?;
+            }
+            write!(f, "{:#04X}", b)?;
+        }
+        write!(f, "]")
+    }
+}
+impl<'a> From<HexBytesSlice<'a>> for &'a [u8] {
+    fn from(value: HexBytesSlice<'a>) -> Self {
+        value.0
+    }
+}
+impl<'a> From<&'a [u8]> for HexBytesSlice<'a> {
+    fn from(value: &'a [u8]) -> Self {
+        Self(value)
+    }
+}
+impl<'a> AsRef<[u8]> for HexBytesSlice<'a> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+impl<'a> Index<usize> for HexBytesSlice<'a> {
+    type Output = u8;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
