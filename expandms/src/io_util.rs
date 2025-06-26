@@ -95,18 +95,22 @@ macro_rules! impl_read_n_bits {
     };
 }
 macro_rules! impl_read_n_bytes {
-    ($name:ident, $byte_count:expr, $ret_type:ty, $convert_func:ident) => {
+    ($name:ident, $read_byte_count:expr, $decode_byte_count:expr, $ret_type:ty, $convert_func:ident) => {
         pub fn $name(&mut self) -> Result<$ret_type, io::Error> {
-            let mut buf = [0u8; $byte_count];
-            for b in &mut buf {
+            let mut buf = [0u8; $decode_byte_count];
+            for b in &mut buf[..$read_byte_count] {
                 *b = self.read_u8()?;
             }
             Ok(<$ret_type>::$convert_func(buf))
         }
     };
+    ($name:ident, $byte_count:expr, $ret_type:ty, $convert_func:ident) => {
+        impl_read_n_bytes!($name, $byte_count, $byte_count, $ret_type, $convert_func);
+    };
 }
 
 impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
+    impl_read_n_bits!(read_u1, 1, u8);
     impl_read_n_bits!(read_u2, 2, u8);
     impl_read_n_bits!(read_u3, 3, u8);
     impl_read_n_bits!(read_u4, 4, u8);
@@ -129,6 +133,8 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
 
     impl_read_n_bytes!(read_u16_le, 2, u16, from_le_bytes);
     impl_read_n_bytes!(read_u16_be, 2, u16, from_be_bytes);
+
+    impl_read_n_bytes!(read_u24_le, 3, 4, u32, from_le_bytes);
 
     pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
         for b in buf {
