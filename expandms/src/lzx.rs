@@ -9,7 +9,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::huff::{HuffmanCanonicalizable, HuffmanTree};
 use crate::io_util::BitReader;
@@ -29,6 +29,7 @@ pub const MAX_WINDOW_SIZE_EXPONENT: usize = 21;
 const MAX_LOOKBACK_DISTANCE: usize = 2*1024*1024;
 
 const LENGTH_TREE_ENTRIES: usize = 249;
+const ALIGNED_OFFSET_TREE_ENTRIES: usize = 8;
 
 
 const fn extra_bits(i: usize) -> usize {
@@ -100,6 +101,14 @@ struct RecentLookback {
     r2: u32,
 }
 impl RecentLookback {
+    pub fn new() -> Self {
+        Self {
+            r0: 0,
+            r1: 0,
+            r2: 0,
+        }
+    }
+
     pub fn lookup(&mut self, offset: Offset) -> u32 {
         match offset {
             Offset::MostRecent => {
@@ -138,6 +147,10 @@ pub enum Error {
     UnknownBlockType(u8),
     ConstructingPreTree,
     InvalidSecondPreTreeValue(&'static str),
+    ConstructingMainTree,
+    ConstructingLengthTree,
+    ConstructingAlignedOffsetTree,
+
     BuildingDefinitionTree,
     DecodingDefinitionValue,
     NoPreviousCodeLength,
@@ -172,6 +185,12 @@ impl fmt::Display for Error {
                 => write!(f, "error constructing pre-tree"),
             Self::InvalidSecondPreTreeValue(value_description)
                 => write!(f, "invalid second pre-tree value: expected LengthDelta(_), obtained {}", value_description),
+            Self::ConstructingMainTree
+                => write!(f, "error constructing main tree"),
+            Self::ConstructingLengthTree
+                => write!(f, "error constructing length tree"),
+            Self::ConstructingAlignedOffsetTree
+                => write!(f, "error constructing aligned offset tree"),
             Self::BuildingDefinitionTree
                 => write!(f, "error building definition tree"),
             Self::DecodingDefinitionValue
@@ -201,6 +220,9 @@ impl std::error::Error for Error {
             Self::UnknownBlockType(_) => None,
             Self::ConstructingPreTree => None,
             Self::InvalidSecondPreTreeValue(_) => None,
+            Self::ConstructingMainTree => None,
+            Self::ConstructingLengthTree => None,
+            Self::ConstructingAlignedOffsetTree => None,
             Self::BuildingDefinitionTree => None,
             Self::DecodingDefinitionValue => None,
             Self::NoPreviousCodeLength => None,
@@ -249,6 +271,7 @@ pub struct LzxDecompressor<'r, R: Read> {
     reader: BitReader<&'r mut R, false>,
     window_size_exponent: usize,
     lookback: Box<RingBuffer<u8, MAX_LOOKBACK_DISTANCE>>,
+    recent_lookback: RecentLookback,
     jump_translation: Option<u32>,
 
     last_main_256_lengths: Box<[usize; 256]>,
@@ -286,20 +309,13 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             reader,
             window_size_exponent,
             lookback: Box::new(RingBuffer::new(0x00)),
+            recent_lookback: RecentLookback::new(),
             jump_translation,
 
             last_main_256_lengths: Box::new([0; 256]),
             last_main_rest_lengths: vec![0; main_tree_rest_entries],
             last_length_lengths: Box::new([0; LENGTH_TREE_ENTRIES]),
         })
-    }
-
-    pub fn lookback(&self) -> &RingBuffer<u8, MAX_LOOKBACK_DISTANCE> {
-        &self.lookback
-    }
-
-    pub fn set_lookback(&mut self, lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>) {
-        *self.lookback = lookback;
     }
 
     fn read_pre_tree(&mut self) -> Result<HuffmanTree<PreTreeCode>, Error> {
@@ -362,186 +378,102 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         Ok(ret)
     }
 
+    fn build_main_tree(&mut self) -> Result<HuffmanTree<_>, Error> {
+        // read the pre-tree for the first 256 elements of the main tree
+        let pre_tree_main_256 = self.read_pre_tree()?;
+
+        // read the path lengths for the first 256 elements of the main tree using the pre-tree
+        let main_256_lengths = self.read_length_delta_tree(&pre_tree_main_256, &self.last_main_256_lengths[..])?;
+
+        // remember the lengths for next time
+        self.last_main_256_lengths.copy_from_slice(&main_256_lengths);
+
+        // same two steps for the rest of the main tree
+        let pre_tree_main_rest = self.read_pre_tree()?;
+        let main_rest_lengths = self.read_length_delta_tree(&pre_tree_main_rest, &self.last_main_rest_lengths)?;
+        self.last_main_rest_lengths = main_rest_lengths;
+
+        // build the main tree
+        let mut main_all_lengths = Vec::with_capacity(main_256_lengths.len() + main_rest_lengths.len());
+        main_all_lengths.extend_from_slice(&main_256_lengths);
+        main_all_lengths.extend_from_slice(&main_rest_lengths);
+        match HuffmanTree::new_canonical(&main_all_lengths) {
+            Ok(mt) => Ok(mt),
+            Err(e) => {
+                error!("error building main tree: {}", e);
+                Err(Error::ConstructingMainTree)
+            },
+        }
+    }
+
     pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
         let block_type = self.reader.read_u3()?;
         let num_uncompressed_bytes = self.reader.read_u24_le()?;
+        todo!("check endianness of num_uncompressed_bytes");
         match block_type {
             1 => {
                 debug!("block type: verbatim");
 
-                let num_uncompressed_bytes = self.reader.read_u24_le()?;
-
-                // read the pre-tree for the first 256 elements of the main tree
-                let pre_tree_main_256 = self.read_pre_tree()?;
-
-                // read the path lengths for the first 256 elements of the main tree using the pre-tree
-                let main_256_lengths = self.read_length_delta_tree(&pre_tree_main_256, &self.last_main_256_lengths)?;
-
-                // remember the lengths for next time
-                self.last_main_256_lengths = main_256_lengths;
-
-                // same two steps for the rest of the main tree
-                let pre_tree_main_rest = self.read_pre_tree()?;
-                let main_rest_lengths = self.read_length_delta_tree(&pre_tree_main_rest, &self.last_main_rest_lengths)?;
-                self.last_main_rest_lengths = main_rest_lengths;
-
                 // build the main tree
-                let mut main_all_lengths = 
+                let main_tree = self.build_main_tree()?;
 
-                // skip remaining bits
-                self.reader.drop_rest_of_byte();
-
-                // read LEN and NLEN
-                let len = self.reader.read_u16_le()?;
-                let _nlen = self.reader.read_u16_le()?;
-                // FIXME: check if { len == !_nlen }?
-
-                debug!("reading {} raw bytes", len);
-
-                let mut buf = vec![0u8; len.into()];
-                self.reader.read_exact(&mut buf)?;
-                dest_buffer.write_all(&buf)?;
-                for b in &buf {
-                    self.lookback.push(*b);
-                }
-            },
-            2 => {
-                // aligned offset block
-                let (value_tree, distance_tree) = if block_type == 1 {
-                    debug!("block type: fixed Huffman tables");
-                    (
-                        Cow::Borrowed(&*PREDEFINED_VALUE_TREE),
-                        Cow::Borrowed(&*PREDEFINED_DISTANCE_TREE),
-                    )
-                } else {
-                    assert_eq!(block_type, 2);
-                    debug!("block type: dynamic Huffman tables");
-
-                    // read the table
-                    let value_code_count = u16::from(self.reader.read_u5()?) + 257;
-                    let distance_code_count = self.reader.read_u5()? + 1;
-                    let length_code_count = self.reader.read_u4()? + 4;
-
-                    let mut definition_code_lengths = [0usize; DEFINITION_CODE_LENGTH_ORDER.len()];
-                    for i in 0..usize::from(length_code_count) {
-                        let code_length = usize::from(self.reader.read_u3()?);
-                        let index = DEFINITION_CODE_LENGTH_ORDER[i];
-                        definition_code_lengths[index] = code_length;
-                    }
-                    debug!("definition code lengths: {:?}", definition_code_lengths);
-
-                    let definition_tree: HuffmanTree<DefinitionValue> = HuffmanTree::new_canonical(&definition_code_lengths)
-                        .map_err(|_| Error::BuildingDefinitionTree)?;
-
-                    let total_code_count = usize::from(value_code_count) + usize::from(distance_code_count);
-                    debug!("definition: {} values + {} distances = {} codes", value_code_count, distance_code_count, total_code_count);
-                    let mut code_lengths = Vec::with_capacity(total_code_count);
-                    let mut previous_code_length = None;
-                    while code_lengths.len() < total_code_count {
-                        let definition_value = definition_tree.decode_one_from_bit_reader(&mut self.reader)
-                            .map_err(|_| Error::DecodingDefinitionValue)?
-                            .ok_or_else(|| Error::Io(io::ErrorKind::InvalidData.into()))?;
-                        match definition_value {
-                            DefinitionValue::CodeLength(code_length) => {
-                                debug!("definition value: code length {}", code_length);
-                                code_lengths.push(usize::from(*code_length));
-                                previous_code_length = Some(*code_length);
-                            },
-                            DefinitionValue::CopyPreviousCodeLength => {
-                                if let Some(pcl) = previous_code_length {
-                                    // find out how often: read 2 bits and add 3
-                                    let copy_count = self.reader.read_u2()? + 3;
-                                    debug!("definition value: previous code length {} times", copy_count);
-                                    for _ in 0..copy_count {
-                                        code_lengths.push(usize::from(pcl));
-                                    }
-                                } else {
-                                    // referring to something unset
-                                    return Err(Error::NoPreviousCodeLength);
-                                }
-                            },
-                            DefinitionValue::ShortZeroes => {
-                                // append zero
-                                // find out how often: read 3 bits and add 3
-                                let zero_count = self.reader.read_u3()? + 3;
-                                debug!("definition value: {} zeroes (short)", zero_count);
-                                for _ in 0..zero_count {
-                                    code_lengths.push(0);
-                                }
-                            },
-                            DefinitionValue::LongZeroes => {
-                                // append more zero
-                                // find out how often: read 7 bits and add 11
-                                let zero_count = self.reader.read_u7()? + 11;
-                                debug!("definition value: {} zeroes (long)", zero_count);
-                                for _ in 0..zero_count {
-                                    code_lengths.push(0);
-                                }
-                            },
-                            DefinitionValue::Invalid(_) => return Err(Error::InvalidDefinitionValue),
-                        }
-                    }
-
-                    // split lengths
-                    let (value_lengths, distance_lengths) = code_lengths.split_at(usize::from(value_code_count));
-
-                    // build trees
-                    let value_tree: HuffmanTree<InflateValue> = HuffmanTree::new_canonical(value_lengths)
-                        .map_err(|_| Error::BuildingValueTree)?;
-                    let distance_tree: HuffmanTree<usize> = HuffmanTree::new_canonical(distance_lengths)
-                        .map_err(|_| Error::BuildingDistanceTree)?;
-                    (Cow::Owned(value_tree), Cow::Owned(distance_tree))
+                // build the length tree
+                let pre_tree_length = self.read_pre_tree()?;
+                let length_lengths = self.read_length_delta_tree(&pre_tree_length, &self.last_length_lengths[..])?;
+                self.last_length_lengths.copy_from_slice(&length_lengths);
+                let length_tree = match HuffmanTree::new_canonical(&main_all_lengths) {
+                    Ok(mt) => mt,
+                    Err(e) => {
+                        error!("error building length tree: {}", e);
+                        return Err(Error::ConstructingLengthTree);
+                    },
                 };
 
-                // now that we have the tree, loop through the data
-                loop {
-                    // read a value
-                    let value = value_tree.decode_one_from_bit_reader(&mut self.reader)
-                        .map_err(|_| Error::ReadingValue)?
-                        .ok_or_else(|| Error::Io(io::ErrorKind::UnexpectedEof.into()))?;
-                    match value {
-                        InflateValue::EndOfBlock => {
-                            // done
-                            debug!("inflate value: end of block");
-                            break;
-                        },
-                        InflateValue::Literal(l) => {
-                            let c = if *l >= b' ' && *l <= b'~' {
-                                char::from_u32(u32::from(*l)).unwrap()
-                            } else {
-                                ' '
-                            };
-                            debug!("inflate value: literal byte {} {:#04X}", c, l);
-                            self.lookback.push(*l);
-                            dest_buffer.push(*l);
-                        },
-                        InflateValue::Lookback(length_index) => {
-                            let length_value = LENGTH_VALUES[*length_index];
-                            let length = length_value.obtain_count(&mut self.reader)?;
-                            debug!("inflate value decoding: look back for {} bytes", length);
+                todo!("read compressed literals");
+            },
+            2 => {
+                debug!("block type: aligned offset");
 
-                            let distance_index = distance_tree.decode_one_from_bit_reader(&mut self.reader)
-                                .map_err(|_| Error::ReadingDistance)?
-                                .ok_or_else(|| Error::Io(io::ErrorKind::UnexpectedEof.into()))?;
-                            debug!("inflate value decoding: look back to distance index {}", distance_index);
-                            let distance_value = DISTANCE_VALUES[*distance_index];
-                            debug!("inflate value decoding: look back to distance value {:?}", distance_value);
-                            let distance = distance_value.obtain_count(&mut self.reader)?;
+                // build the main tree
+                let main_tree = self.build_main_tree()?;
 
-                            debug!("inflate value: look back {} bytes for {} bytes", distance, length);
-
-                            let mut buf = self.lookback.recall(distance, length);
-                            debug!("inflate value addendum: lookback buffer: {}", HexBytesSlice::from(buf.as_slice()));
-                            dest_buffer.append(&mut buf);
-                        },
-                        InflateValue::Invalid(_) => return Err(Error::InvalidValue),
-                    }
+                // build the aligned offset tree
+                let aligned_offset_tree_lengths = [0usize; ALIGNED_OFFSET_TREE_ENTRIES];
+                for item in &mut aligned_offset_tree_lengths {
+                    *item = self.reader.read_u3()?.into();
                 }
+                let aligned_offset_tree = match HuffmanTree::new_canonical(&aligned_offset_tree_lengths) {
+                    Ok(aot) => aot,
+                    Err(e) => {
+                        error!("error building aligned offset tree: {}", e);
+                        return Err(Error::ConstructingAlignedOffsetTree);
+                    }
+                };
+
+                todo!("read compressed literals");
             },
             3 => {
                 // uncompressed block
 
-                // spec erratum: now follow 24 bits of length
+                // spec erratum: uncompressed blocks also start with the 24 bits of length (read above)
+
+                // padding to next 16-bit boundary, including if we already are at a 16-bit boundary
+                let bits_to_drop = 16 - (self.reader.total_bits_read() % 16);
+                for _ in 0..bits_to_drop {
+                    self.reader.read_bit_strict()?;
+                }
+
+                // in little-endian format, new values for the recent-lookback system
+                let mut buf = [0u8; 4];
+                self.reader.read_exact(&mut buf)?;
+                self.recent_lookback.r0 = u32::from_le_bytes(buf);
+                self.reader.read_exact(&mut buf)?;
+                self.recent_lookback.r1 = u32::from_le_bytes(buf);
+                self.reader.read_exact(&mut buf)?;
+                self.recent_lookback.r2 = u32::from_le_bytes(buf);
+
+                todo!("read uncompressed bytes");
+                todo!("realignment byte if uncompressed size is odd");
 
                 let (value_tree, distance_tree) = if block_type == 1 {
                     debug!("block type: fixed Huffman tables");

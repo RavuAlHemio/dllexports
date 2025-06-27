@@ -8,6 +8,7 @@ pub(crate) struct BitReader<R: Read, const MSB_TO_LSB: bool> {
     byte_reader: R,
     byte_picked_apart: Option<u8>,
     bit_index: u8,
+    total_bits_read: u64,
 }
 impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     pub fn new(byte_reader: R) -> Self {
@@ -15,6 +16,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
             byte_reader,
             byte_picked_apart: None,
             bit_index: 0,
+            total_bits_read: 0,
         }
     }
 
@@ -46,6 +48,8 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
             self.drop_rest_of_byte();
         }
 
+        self.total_bits_read += 1;
+
         Ok(Some(bit_is_set))
     }
 
@@ -58,9 +62,14 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     }
 
     pub fn drop_rest_of_byte(&mut self) {
+        if self.bit_index > 0 {
+            self.total_bits_read += u64::from(8 - self.bit_index);
+        }
         self.bit_index = 0;
         self.byte_picked_apart = None;
     }
+
+    pub fn total_bits_read(&self) -> u64 { self.total_bits_read }
 }
 impl<R: Read> BitReader<R, true> {
     pub fn new_msb_to_lsb(byte_reader: R) -> Self {
@@ -125,6 +134,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
             // yes; just read the next byte from the underlying reader
             let mut buf = [0u8];
             self.byte_reader.read_exact(&mut buf)?;
+            self.total_bits_read += 8;
             Ok(buf[0])
         } else {
             self.read_u8_bitwise()
