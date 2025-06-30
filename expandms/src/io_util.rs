@@ -84,6 +84,7 @@ impl<R: Read> BitReader<R, false> {
 
 macro_rules! impl_read_n_bits {
     ($name:ident, $bit_count:expr, $ret_type:ty) => {
+        #[must_use]
         pub fn $name(&mut self) -> Result<$ret_type, io::Error> {
             let mut ret = 0;
             for i in 0..$bit_count {
@@ -105,6 +106,7 @@ macro_rules! impl_read_n_bits {
 }
 macro_rules! impl_read_n_bytes {
     ($name:ident, $read_byte_count:expr, $decode_byte_count:expr, $ret_type:ty, $convert_func:ident) => {
+        #[must_use]
         pub fn $name(&mut self) -> Result<$ret_type, io::Error> {
             let mut buf = [0u8; $decode_byte_count];
             for b in &mut buf[..$read_byte_count] {
@@ -128,6 +130,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     impl_read_n_bits!(read_u7, 7, u8);
     impl_read_n_bits!(read_u8_bitwise, 8, u8);
 
+    #[must_use]
     pub fn read_u8(&mut self) -> Result<u8, io::Error> {
         // optimization: are we at a byte boundary?
         if self.bit_index == 0 {
@@ -146,6 +149,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
 
     impl_read_n_bytes!(read_u24_le, 3, 4, u32, from_le_bytes);
 
+    #[must_use]
     pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
         for b in buf {
             *b = self.read_u8()?;

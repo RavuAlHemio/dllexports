@@ -7,7 +7,7 @@
 //! [mspacklzx]: https://github.com/kyz/libmspack/blob/305907723a4e7ab2018e58040059ffb5e77db837/libmspack/mspack/lzxd.c#L18
 
 use std::fmt;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
 use tracing::{debug, error};
 
@@ -32,25 +32,48 @@ const LENGTH_TREE_ENTRIES: usize = 249;
 const ALIGNED_OFFSET_TREE_ENTRIES: usize = 8;
 
 
-const fn extra_bits(i: usize) -> usize {
-    if i < 4 {
+macro_rules! make_unsigned_const_conversion_function {
+    ($name:ident, $from_type:ty, $to_type:ty) => {
+        const fn $name(val: $from_type) -> $to_type {
+            const FROM_SIZE: usize = std::mem::size_of::<$from_type>();
+            const TO_SIZE: usize = std::mem::size_of::<$to_type>();
+            if FROM_SIZE <= TO_SIZE {
+                val as $to_type
+            } else {
+                // FROM_SIZE > TO_SIZE
+                if val <= (<$to_type>::MAX as $from_type) {
+                    val as $to_type
+                } else {
+                    panic!("value too large");
+                }
+            }
+        }
+    };
+}
+
+
+const fn extra_bits(position_slot_number: u32) -> u32 {
+    if position_slot_number < 4 {
         0
-    } else if i < 36 {
+    } else if position_slot_number < 36 {
         // i is guaranteed to be in 4..=35
         // => i / 2 is at least 2
         // => subtraction (worst case: 2 - 1) will never underflow
         // compiler can't reason that out => use wrapping_sub
-        (i / 2).wrapping_sub(1)
+        (position_slot_number / 2).wrapping_sub(1)
     } else {
         17
     }
 }
 
-const POSITION_BASE: [usize; 291] = {
+make_unsigned_const_conversion_function!(usize_to_u32, usize, u32);
+make_unsigned_const_conversion_function!(u32_to_usize, u32, usize);
+
+const POSITION_SLOT_NUMBER_TO_POSITION_BASE: [u32; 291] = {
     let mut pb = [0; 291];
     let mut i = 1;
     while i < pb.len() {
-        pb[i] = pb[i-1] + (1 << extra_bits(i-1));
+        pb[i] = pb[i-1] + (1 << extra_bits(usize_to_u32(i-1)));
         i += 1;
     }
     pb
@@ -63,8 +86,8 @@ const WINDOW_SIZE_EXPONENT_TO_POSITION_SLOTS: [usize; 26] = {
     while i < ps.len() {
         let two_power = 1 << i;
         let mut j = 0;
-        while j < POSITION_BASE.len() {
-            if two_power <= POSITION_BASE[j] {
+        while j < POSITION_SLOT_NUMBER_TO_POSITION_BASE.len() {
+            if two_power <= POSITION_SLOT_NUMBER_TO_POSITION_BASE[j] {
                 ps[i] = j;
                 break;
             }
@@ -91,7 +114,9 @@ enum Offset {
     MostRecent,
     SecondMostRecent,
     ThirdMostRecent,
-    Absolute(u32), // max: window_size - 3 (absolute max: 2_097_149)
+    Absolute {
+        position_slot_number: u32, // max: window_size (absolute max: 2_097_152), with 3 meaning offset 1
+    },
 }
 impl HuffmanCanonicalizable for Offset {
     // the values are not directly placed in a Huffman tree,
@@ -105,8 +130,16 @@ impl HuffmanCanonicalizable for Offset {
         match self {
             Self::MostRecent => Self::SecondMostRecent,
             Self::SecondMostRecent => Self::ThirdMostRecent,
-            Self::ThirdMostRecent => Self::Absolute(1),
-            Self::Absolute(n) => Self::Absolute(*n + 1),
+            Self::ThirdMostRecent => {
+                Self::Absolute {
+                    position_slot_number: 3,
+                }
+            },
+            Self::Absolute { position_slot_number } => {
+                Self::Absolute {
+                    position_slot_number: *position_slot_number + 1,
+                }
+            },
         }
     }
 }
@@ -126,29 +159,35 @@ impl RecentLookback {
         }
     }
 
-    pub fn lookup(&mut self, offset: Offset) -> u32 {
+    // the boolean value returns whether it is an absolute offset and a new value must be pushed in
+    pub fn lookup(&mut self, offset: Offset) -> (u32, bool) {
         match offset {
             Offset::MostRecent => {
-                // theoretically: swap R0 with R0
+                // "swap r0 and r0" (i.e. do nothing)
+                (self.r0, false)
             },
             Offset::SecondMostRecent => {
-                // swap R0 with R1
+                // swap r0 and r1
                 std::mem::swap(&mut self.r0, &mut self.r1);
+                (self.r0, false)
             },
             Offset::ThirdMostRecent => {
-                // swap R0 with R2
+                // swap r0 and r2
                 std::mem::swap(&mut self.r0, &mut self.r2);
+                (self.r0, false)
             },
-            Offset::Absolute(abs) => {
-                // shift the absolute value in
-                self.r2 = self.r1;
-                self.r1 = self.r0;
-                self.r0 = abs;
+            Offset::Absolute { position_slot_number } => {
+                // this will need adjustment
+                (position_slot_number, true)
             },
         }
+    }
 
-        // return newest R0
-        self.r0
+    pub fn push(&mut self, new_offset: u32) {
+        // self.r2 falls out
+        self.r2 = self.r1;
+        self.r1 = self.r0;
+        self.r0 = new_offset;
     }
 }
 impl Default for RecentLookback {
@@ -284,12 +323,51 @@ impl HuffmanCanonicalizable for PreTreeCode {
     }
 }
 
+/// A three-bit (0..=7) length indicator in a header.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct LengthHeader(u8);
+impl LengthHeader {
+    pub const fn new(length_header: u8) -> Option<Self> {
+        if length_header < 8 {
+            Some(Self(length_header))
+        } else {
+            None
+        }
+    }
+
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    pub const fn as_u8(&self) -> u8 {
+        self.0
+    }
+
+    /// Whether the length value has its maximum value, which indicates that the actual length is
+    /// encoded externally.
+    pub const fn is_max(&self) -> bool {
+        self.0 == 7
+    }
+}
+impl From<LengthHeader> for u8 {
+    fn from(value: LengthHeader) -> Self {
+        value.as_u8()
+    }
+}
+impl TryFrom<u8> for LengthHeader {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum MainTreeCode {
     LiteralByte(u8), // n in 0..=255
     Lookback {
         offset: Offset, // (n - 256), all other bits
-        length_header: u8, // (n - 256), bottom three bits
+        length_header: LengthHeader, // (n - 256), bottom three bits (0..=7)
     },
 }
 impl HuffmanCanonicalizable for MainTreeCode {
@@ -325,27 +403,35 @@ impl HuffmanCanonicalizable for MainTreeCode {
                 if *n == 255 {
                     Self::Lookback {
                         offset: Offset::MostRecent,
-                        length_header: 0,
+                        length_header: LengthHeader::zero(),
                     }
                 } else {
                     Self::LiteralByte(*n + 1)
                 }
             },
             Self::Lookback { offset, length_header} => {
-                if *length_header == 7 {
+                if length_header.is_max() {
                     Self::Lookback {
                         offset: offset.incremented(),
-                        length_header: 0,
+                        length_header: LengthHeader::zero(),
                     }
                 } else {
                     Self::Lookback {
                         offset: *offset,
-                        length_header: *length_header + 1,
+                        length_header: LengthHeader::new(length_header.as_u8() + 1).unwrap(),
                     }
                 }
             },
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum PreviousLengthType<'a> {
+    Main256,
+    MainRest,
+    Length,
+    Other(&'a [usize]),
 }
 
 pub struct LzxDecompressor<'r, R: Read> {
@@ -413,7 +499,14 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         }
     }
 
-    fn read_length_delta_tree(&mut self, pre_tree: &HuffmanTree<PreTreeCode>, prev_lengths: &[usize]) -> Result<Vec<usize>, Error> {
+    fn read_length_delta_tree(&mut self, pre_tree: &HuffmanTree<PreTreeCode>, prev_length_type: PreviousLengthType) -> Result<Vec<usize>, Error> {
+        let prev_lengths = match prev_length_type {
+            PreviousLengthType::Main256 => &self.last_main_256_lengths[..],
+            PreviousLengthType::MainRest => &self.last_main_rest_lengths[..],
+            PreviousLengthType::Length => &self.last_length_lengths[..],
+            PreviousLengthType::Other(items) => items,
+        };
+
         let mut ret = vec![0; prev_lengths.len()];
         let mut i = 0;
         while i < ret.len() {
@@ -459,35 +552,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         Ok(ret)
     }
 
-    fn build_main_tree(&mut self) -> Result<HuffmanTree<MainTreeCode>, Error> {
-        // read the pre-tree for the first 256 elements of the main tree
-        let pre_tree_main_256 = self.read_pre_tree()?;
-
-        // read the path lengths for the first 256 elements of the main tree using the pre-tree
-        let main_256_lengths = self.read_length_delta_tree(&pre_tree_main_256, &self.last_main_256_lengths[..])?;
-
-        // remember the lengths for next time
-        self.last_main_256_lengths.copy_from_slice(&main_256_lengths);
-
-        // same two steps for the rest of the main tree
-        let pre_tree_main_rest = self.read_pre_tree()?;
-        let main_rest_lengths = self.read_length_delta_tree(&pre_tree_main_rest, &self.last_main_rest_lengths)?;
-        self.last_main_rest_lengths = main_rest_lengths;
-
-        // build the main tree
-        let mut main_all_lengths = Vec::with_capacity(main_256_lengths.len() + main_rest_lengths.len());
-        main_all_lengths.extend_from_slice(&main_256_lengths);
-        main_all_lengths.extend_from_slice(&main_rest_lengths);
-        match HuffmanTree::new_canonical(&main_all_lengths) {
-            Ok(mt) => Ok(mt),
-            Err(e) => {
-                error!("error building main tree: {}", e);
-                Err(Error::ConstructingMainTree)
-            },
-        }
-    }
-
-    pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
+    pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<(), Error> {
         let block_type = self.reader.read_u3()?;
         let num_uncompressed_bytes = {
             let mut buf = [0u8; 4];
@@ -497,17 +562,61 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             u32::from_be_bytes(buf)
         };
         match block_type {
-            1 => {
-                debug!("block type: verbatim");
+            1|2 => {
+                // lots of shared code for these two types
+                let aligned_offset_tree_opt = if block_type == 1 {
+                    debug!("block type: verbatim");
+                    None
+                } else {
+                    debug_assert_eq!(block_type, 2);
+                    debug!("block type: aligned offset");
+
+                    // build the aligned offset tree
+                    let mut aligned_offset_tree_lengths = [0usize; ALIGNED_OFFSET_TREE_ENTRIES];
+                    for item in &mut aligned_offset_tree_lengths {
+                        *item = self.reader.read_u3()?.into();
+                    }
+                    let aligned_offset_tree = match HuffmanTree::new_canonical(&aligned_offset_tree_lengths) {
+                        Ok(aot) => aot,
+                        Err(e) => {
+                            error!("error building aligned offset tree: {}", e);
+                            return Err(Error::ConstructingAlignedOffsetTree);
+                        }
+                    };
+                    Some(aligned_offset_tree)
+                };
+
+                // read the pre-tree for the first 256 elements of the main tree
+                let pre_tree_main_256 = self.read_pre_tree()?;
+
+                // read the path lengths for the first 256 elements of the main tree using the pre-tree
+                let main_256_lengths = self.read_length_delta_tree(&pre_tree_main_256, PreviousLengthType::Main256)?;
+
+                // remember the lengths for next time
+                self.last_main_256_lengths.copy_from_slice(&main_256_lengths);
+
+                // same two steps for the rest of the main tree
+                let pre_tree_main_rest = self.read_pre_tree()?;
+                let main_rest_lengths = self.read_length_delta_tree(&pre_tree_main_rest, PreviousLengthType::MainRest)?;
+                self.last_main_rest_lengths.copy_from_slice(&main_rest_lengths);
 
                 // build the main tree
-                let main_tree = self.build_main_tree()?;
+                let mut main_all_lengths = Vec::with_capacity(main_256_lengths.len() + main_rest_lengths.len());
+                main_all_lengths.extend_from_slice(&main_256_lengths);
+                main_all_lengths.extend_from_slice(&main_rest_lengths);
+                let main_tree = match HuffmanTree::new_canonical(&main_all_lengths) {
+                    Ok(mt) => mt,
+                    Err(e) => {
+                        error!("error building main tree: {}", e);
+                        return Err(Error::ConstructingMainTree);
+                    },
+                };
 
                 // build the length tree
                 let pre_tree_length = self.read_pre_tree()?;
-                let length_lengths = self.read_length_delta_tree(&pre_tree_length, &self.last_length_lengths[..])?;
+                let length_lengths = self.read_length_delta_tree(&pre_tree_length, PreviousLengthType::Length)?;
                 self.last_length_lengths.copy_from_slice(&length_lengths);
-                let length_tree: HuffmanTree<usize> = match HuffmanTree::new_canonical(&length_lengths) {
+                let length_tree: HuffmanTree<u32> = match HuffmanTree::new_canonical(&length_lengths) {
                     Ok(mt) => mt,
                     Err(e) => {
                         error!("error building length tree: {}", e);
@@ -515,28 +624,109 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                     },
                 };
 
-                todo!("read compressed literals");
-            },
-            2 => {
-                debug!("block type: aligned offset");
+                let mut bytes_output = 0;
+                while bytes_output < num_uncompressed_bytes {
+                    // decode an element from the main tree
+                    let main_tree_code = main_tree.decode_one_from_bit_reader(&mut self.reader)?
+                        .ok_or_else(|| Error::new_eof())?;
+                    match main_tree_code {
+                        MainTreeCode::LiteralByte(b) => {
+                            // this one's easy to handle
+                            self.lookback.push(*b);
+                            dest_buffer.push(*b);
+                            bytes_output += 1;
+                        },
+                        MainTreeCode::Lookback { offset, length_header } => {
+                            // okay, how long is the match?
+                            let match_length = if length_header.is_max() {
+                                // at least 7 but possibly more; decode using the length table
+                                let tree_length = length_tree.decode_one_from_bit_reader(&mut self.reader)?
+                                    .ok_or_else(|| Error::new_eof())?;
+                                *tree_length + 7 + 2
+                            } else {
+                                u32::from(length_header.as_u8()) + 2
+                            };
 
-                // build the main tree
-                let main_tree = self.build_main_tree()?;
+                            // how far back is it?
+                            let (match_offset_value, is_absolute) = self.recent_lookback.lookup(*offset);
+                            let match_offset = if is_absolute {
+                                let position_slot_number = match_offset_value;
 
-                // build the aligned offset tree
-                let aligned_offset_tree_lengths = [0usize; ALIGNED_OFFSET_TREE_ENTRIES];
-                for item in &mut aligned_offset_tree_lengths {
-                    *item = self.reader.read_u3()?.into();
-                }
-                let aligned_offset_tree = match HuffmanTree::new_canonical(&aligned_offset_tree_lengths) {
-                    Ok(aot) => aot,
-                    Err(e) => {
-                        error!("error building aligned offset tree: {}", e);
-                        return Err(Error::ConstructingAlignedOffsetTree);
+                                // okay, how many extra bits do we have in this position?
+                                let extra_bit_count = extra_bits(position_slot_number);
+
+                                let (verbatim_bits, aligned_bits) = if let Some(aligned_offset_tree) = aligned_offset_tree_opt.as_ref() {
+                                    // aligned block; some of those extra bits might be aligned bits
+                                    if extra_bit_count >= 3 {
+                                        // the three bottommost bits are aligned bits, the rest are verbatim bits
+
+                                        // we have max. 17 extra bits, so they will fit into u32
+                                        assert!(extra_bit_count <= 17);
+                                        let mut verbatim_bits = 0u32;
+                                        for _ in 0..(extra_bit_count-3) {
+                                            verbatim_bits <<= 1;
+                                            if self.reader.read_bit_strict()? {
+                                                verbatim_bits |= 1;
+                                            }
+                                        }
+
+                                        // move the verbatim bits value by three more bits
+                                        verbatim_bits <<= 3;
+
+                                        // obtain the aligned bits from the aligned offset tree
+                                        let aligned_bits = *aligned_offset_tree.decode_one_from_bit_reader(&mut self.reader)?
+                                            .ok_or_else(|| Error::new_eof())?;
+
+                                        (verbatim_bits, aligned_bits)
+                                    } else {
+                                        // 0..=2 extra bits => no aligned bits
+                                        assert!(extra_bit_count <= 17);
+                                        let mut verbatim_bits = 0u32;
+                                        for _ in 0..extra_bit_count {
+                                            verbatim_bits <<= 1;
+                                            if self.reader.read_bit_strict()? {
+                                                verbatim_bits |= 1;
+                                            }
+                                        }
+
+                                        (verbatim_bits, 0)
+                                    }
+                                } else {
+                                    // verbatim block, no aligned bits
+                                    assert!(extra_bit_count <= 17);
+                                    let mut verbatim_bits = 0u32;
+                                    for _ in 0..(extra_bit_count-3) {
+                                        verbatim_bits <<= 1;
+                                        if self.reader.read_bit_strict()? {
+                                            verbatim_bits |= 1;
+                                        }
+                                    }
+
+                                    (verbatim_bits, 0)
+                                };
+
+                                let formatted_offset =
+                                    POSITION_SLOT_NUMBER_TO_POSITION_BASE[u32_to_usize(position_slot_number)]
+                                    + verbatim_bits
+                                    + aligned_bits;
+                                let actual_match_offset = formatted_offset - 2;
+
+                                // remember this for next time
+                                self.recent_lookback.push(actual_match_offset);
+
+                                actual_match_offset
+                            } else {
+                                // relative offsets are already complete
+                                match_offset_value
+                            };
+
+                            // gimme
+                            let mut buffer = self.lookback.recall(u32_to_usize(match_offset), u32_to_usize(match_length));
+                            bytes_output += match_length;
+                            dest_buffer.append(&mut buffer);
+                        },
                     }
-                };
-
-                todo!("read compressed literals");
+                }
             },
             3 => {
                 // uncompressed block
@@ -550,150 +740,25 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 }
 
                 // in little-endian format, new values for the recent-lookback system
-                let mut buf = [0u8; 4];
+                let mut recent_buf = [0u8; 4];
+                self.reader.read_exact(&mut recent_buf)?;
+                self.recent_lookback.r0 = u32::from_le_bytes(recent_buf);
+                self.reader.read_exact(&mut recent_buf)?;
+                self.recent_lookback.r1 = u32::from_le_bytes(recent_buf);
+                self.reader.read_exact(&mut recent_buf)?;
+                self.recent_lookback.r2 = u32::from_le_bytes(recent_buf);
+
+                let mut buf = vec![0u8; u32_to_usize(num_uncompressed_bytes)];
                 self.reader.read_exact(&mut buf)?;
-                self.recent_lookback.r0 = u32::from_le_bytes(buf);
-                self.reader.read_exact(&mut buf)?;
-                self.recent_lookback.r1 = u32::from_le_bytes(buf);
-                self.reader.read_exact(&mut buf)?;
-                self.recent_lookback.r2 = u32::from_le_bytes(buf);
 
-                todo!("read uncompressed bytes");
-                todo!("realignment byte if uncompressed size is odd");
-
-                let (value_tree, distance_tree) = if block_type == 1 {
-                    debug!("block type: fixed Huffman tables");
-                    (
-                        Cow::Borrowed(&*PREDEFINED_VALUE_TREE),
-                        Cow::Borrowed(&*PREDEFINED_DISTANCE_TREE),
-                    )
-                } else {
-                    assert_eq!(block_type, 2);
-                    debug!("block type: dynamic Huffman tables");
-
-                    // read the table
-                    let value_code_count = u16::from(self.reader.read_u5()?) + 257;
-                    let distance_code_count = self.reader.read_u5()? + 1;
-                    let length_code_count = self.reader.read_u4()? + 4;
-
-                    let mut definition_code_lengths = [0usize; DEFINITION_CODE_LENGTH_ORDER.len()];
-                    for i in 0..usize::from(length_code_count) {
-                        let code_length = usize::from(self.reader.read_u3()?);
-                        let index = DEFINITION_CODE_LENGTH_ORDER[i];
-                        definition_code_lengths[index] = code_length;
-                    }
-                    debug!("definition code lengths: {:?}", definition_code_lengths);
-
-                    let definition_tree: HuffmanTree<DefinitionValue> = HuffmanTree::new_canonical(&definition_code_lengths)
-                        .map_err(|_| Error::BuildingDefinitionTree)?;
-
-                    let total_code_count = usize::from(value_code_count) + usize::from(distance_code_count);
-                    debug!("definition: {} values + {} distances = {} codes", value_code_count, distance_code_count, total_code_count);
-                    let mut code_lengths = Vec::with_capacity(total_code_count);
-                    let mut previous_code_length = None;
-                    while code_lengths.len() < total_code_count {
-                        let definition_value = definition_tree.decode_one_from_bit_reader(&mut self.reader)
-                            .map_err(|_| Error::DecodingDefinitionValue)?
-                            .ok_or_else(|| Error::Io(io::ErrorKind::InvalidData.into()))?;
-                        match definition_value {
-                            DefinitionValue::CodeLength(code_length) => {
-                                debug!("definition value: code length {}", code_length);
-                                code_lengths.push(usize::from(*code_length));
-                                previous_code_length = Some(*code_length);
-                            },
-                            DefinitionValue::CopyPreviousCodeLength => {
-                                if let Some(pcl) = previous_code_length {
-                                    // find out how often: read 2 bits and add 3
-                                    let copy_count = self.reader.read_u2()? + 3;
-                                    debug!("definition value: previous code length {} times", copy_count);
-                                    for _ in 0..copy_count {
-                                        code_lengths.push(usize::from(pcl));
-                                    }
-                                } else {
-                                    // referring to something unset
-                                    return Err(Error::NoPreviousCodeLength);
-                                }
-                            },
-                            DefinitionValue::ShortZeroes => {
-                                // append zero
-                                // find out how often: read 3 bits and add 3
-                                let zero_count = self.reader.read_u3()? + 3;
-                                debug!("definition value: {} zeroes (short)", zero_count);
-                                for _ in 0..zero_count {
-                                    code_lengths.push(0);
-                                }
-                            },
-                            DefinitionValue::LongZeroes => {
-                                // append more zero
-                                // find out how often: read 7 bits and add 11
-                                let zero_count = self.reader.read_u7()? + 11;
-                                debug!("definition value: {} zeroes (long)", zero_count);
-                                for _ in 0..zero_count {
-                                    code_lengths.push(0);
-                                }
-                            },
-                            DefinitionValue::Invalid(_) => return Err(Error::InvalidDefinitionValue),
-                        }
-                    }
-
-                    // split lengths
-                    let (value_lengths, distance_lengths) = code_lengths.split_at(usize::from(value_code_count));
-
-                    // build trees
-                    let value_tree: HuffmanTree<InflateValue> = HuffmanTree::new_canonical(value_lengths)
-                        .map_err(|_| Error::BuildingValueTree)?;
-                    let distance_tree: HuffmanTree<usize> = HuffmanTree::new_canonical(distance_lengths)
-                        .map_err(|_| Error::BuildingDistanceTree)?;
-                    (Cow::Owned(value_tree), Cow::Owned(distance_tree))
-                };
-
-                // now that we have the tree, loop through the data
-                loop {
-                    // read a value
-                    let value = value_tree.decode_one_from_bit_reader(&mut self.reader)
-                        .map_err(|_| Error::ReadingValue)?
-                        .ok_or_else(|| Error::Io(io::ErrorKind::UnexpectedEof.into()))?;
-                    match value {
-                        InflateValue::EndOfBlock => {
-                            // done
-                            debug!("inflate value: end of block");
-                            break;
-                        },
-                        InflateValue::Literal(l) => {
-                            let c = if *l >= b' ' && *l <= b'~' {
-                                char::from_u32(u32::from(*l)).unwrap()
-                            } else {
-                                ' '
-                            };
-                            debug!("inflate value: literal byte {} {:#04X}", c, l);
-                            self.lookback.push(*l);
-                            dest_buffer.push(*l);
-                        },
-                        InflateValue::Lookback(length_index) => {
-                            let length_value = LENGTH_VALUES[*length_index];
-                            let length = length_value.obtain_count(&mut self.reader)?;
-                            debug!("inflate value decoding: look back for {} bytes", length);
-
-                            let distance_index = distance_tree.decode_one_from_bit_reader(&mut self.reader)
-                                .map_err(|_| Error::ReadingDistance)?
-                                .ok_or_else(|| Error::Io(io::ErrorKind::UnexpectedEof.into()))?;
-                            debug!("inflate value decoding: look back to distance index {}", distance_index);
-                            let distance_value = DISTANCE_VALUES[*distance_index];
-                            debug!("inflate value decoding: look back to distance value {:?}", distance_value);
-                            let distance = distance_value.obtain_count(&mut self.reader)?;
-
-                            debug!("inflate value: look back {} bytes for {} bytes", distance, length);
-
-                            let mut buf = self.lookback.recall(distance, length);
-                            debug!("inflate value addendum: lookback buffer: {}", HexBytesSlice::from(buf.as_slice()));
-                            dest_buffer.append(&mut buf);
-                        },
-                        InflateValue::Invalid(_) => return Err(Error::InvalidValue),
-                    }
+                if num_uncompressed_bytes % 2 == 1 {
+                    // read an additional byte to realign to u16
+                    let mut byte_buf = [0u8];
+                    self.reader.read_exact(&mut byte_buf)?;
                 }
             },
             other => return Err(Error::UnknownBlockType(other)),
         }
-        Ok(is_final)
+        Ok(())
     }
 }
