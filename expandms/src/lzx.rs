@@ -86,12 +86,29 @@ const WINDOW_SIZE_EXPONENT_TO_POSITION_SLOTS: [usize; 26] = {
 
 // each pre-tree always contains 20 elements
 
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum Offset {
     MostRecent,
     SecondMostRecent,
     ThirdMostRecent,
     Absolute(u32), // max: window_size - 3 (absolute max: 2_097_149)
+}
+impl HuffmanCanonicalizable for Offset {
+    // the values are not directly placed in a Huffman tree,
+    // but this increment logic is useful for later
+
+    fn first_value() -> Self {
+        Self::MostRecent
+    }
+
+    fn incremented(&self) -> Self {
+        match self {
+            Self::MostRecent => Self::SecondMostRecent,
+            Self::SecondMostRecent => Self::ThirdMostRecent,
+            Self::ThirdMostRecent => Self::Absolute(1),
+            Self::Absolute(n) => Self::Absolute(*n + 1),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -267,6 +284,70 @@ impl HuffmanCanonicalizable for PreTreeCode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum MainTreeCode {
+    LiteralByte(u8), // n in 0..=255
+    Lookback {
+        offset: Offset, // (n - 256), all other bits
+        length_header: u8, // (n - 256), bottom three bits
+    },
+}
+impl HuffmanCanonicalizable for MainTreeCode {
+    fn first_value() -> Self {
+        Self::LiteralByte(0)
+    }
+
+    fn incremented(&self) -> Self {
+        // 0 0000 0000 => literal 0x00
+        // 0 0000 0001 => literal 0x01
+        // ...
+        // 0 1111 1111 => literal 0x0F
+        // 1 0000 0000 => recent R0, length header 0
+        // 1 0000 0001 => recent R0, length header 1
+        // ...
+        // 1 0000 0111 => recent R0, length header 7
+        // 1 0000 1000 => recent R1, length header 0
+        // 1 0000 1001 => recent R1, length header 1
+        // ...
+        // 1 0000 1111 => recent R1, length header 7
+        // 1 0001 0000 => recent R2, length header 0
+        // 1 0001 0001 => recent R2, length header 1
+        // ...
+        // 1 0001 0111 => recent R2, length header 7
+        // 1 0001 1000 => actual offset 1, length header 0
+        // 1 0001 1001 => actual offset 1, length header 1
+        // ...
+        // 1 0001 1111 => actual offset 1, length header 7
+        // 1 0010 0000 => actual offset 2, length header 0
+        // etc.
+        match self {
+            Self::LiteralByte(n) => {
+                if *n == 255 {
+                    Self::Lookback {
+                        offset: Offset::MostRecent,
+                        length_header: 0,
+                    }
+                } else {
+                    Self::LiteralByte(*n + 1)
+                }
+            },
+            Self::Lookback { offset, length_header} => {
+                if *length_header == 7 {
+                    Self::Lookback {
+                        offset: offset.incremented(),
+                        length_header: 0,
+                    }
+                } else {
+                    Self::Lookback {
+                        offset: *offset,
+                        length_header: *length_header + 1,
+                    }
+                }
+            },
+        }
+    }
+}
+
 pub struct LzxDecompressor<'r, R: Read> {
     reader: BitReader<&'r mut R, false>,
     window_size_exponent: usize,
@@ -378,7 +459,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         Ok(ret)
     }
 
-    fn build_main_tree(&mut self) -> Result<HuffmanTree<_>, Error> {
+    fn build_main_tree(&mut self) -> Result<HuffmanTree<MainTreeCode>, Error> {
         // read the pre-tree for the first 256 elements of the main tree
         let pre_tree_main_256 = self.read_pre_tree()?;
 
@@ -408,8 +489,13 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
 
     pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<bool, Error> {
         let block_type = self.reader.read_u3()?;
-        let num_uncompressed_bytes = self.reader.read_u24_le()?;
-        todo!("check endianness of num_uncompressed_bytes");
+        let num_uncompressed_bytes = {
+            let mut buf = [0u8; 4];
+            for b in &mut buf[1..4] {
+                *b = self.reader.read_u8()?;
+            }
+            u32::from_be_bytes(buf)
+        };
         match block_type {
             1 => {
                 debug!("block type: verbatim");
@@ -421,7 +507,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 let pre_tree_length = self.read_pre_tree()?;
                 let length_lengths = self.read_length_delta_tree(&pre_tree_length, &self.last_length_lengths[..])?;
                 self.last_length_lengths.copy_from_slice(&length_lengths);
-                let length_tree = match HuffmanTree::new_canonical(&main_all_lengths) {
+                let length_tree: HuffmanTree<usize> = match HuffmanTree::new_canonical(&length_lengths) {
                     Ok(mt) => mt,
                     Err(e) => {
                         error!("error building length tree: {}", e);
