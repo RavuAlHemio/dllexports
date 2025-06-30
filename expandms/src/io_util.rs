@@ -3,85 +3,6 @@ use std::io::{self, Read};
 use display_bytes::DisplayBytes;
 
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct BitReader<R: Read, const MSB_TO_LSB: bool> {
-    byte_reader: R,
-    byte_picked_apart: Option<u8>,
-    bit_index: u8,
-    total_bits_read: u64,
-}
-impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
-    pub fn new(byte_reader: R) -> Self {
-        Self {
-            byte_reader,
-            byte_picked_apart: None,
-            bit_index: 0,
-            total_bits_read: 0,
-        }
-    }
-
-    pub fn read_bit(&mut self) -> Result<Option<bool>, io::Error> {
-        if self.bit_index == 0 {
-            // pull in new byte
-            let mut buf = [0u8];
-            let bytes_read = self.byte_reader.read(&mut buf)?;
-            if bytes_read == 0 {
-                // EOF
-                return Ok(None);
-            }
-            self.byte_picked_apart = Some(buf[0]);
-        }
-
-        // if bit_index > 0, we have already stored a byte
-
-        let byte_picked_apart = self.byte_picked_apart.unwrap();
-        let actual_bit_index = if MSB_TO_LSB {
-            7 - self.bit_index
-        } else {
-            self.bit_index
-        };
-        let bit_is_set = (byte_picked_apart & (1 << actual_bit_index)) != 0;
-
-        self.bit_index += 1;
-        if self.bit_index == 8 {
-            // prepare for next byte
-            self.drop_rest_of_byte();
-        }
-
-        self.total_bits_read += 1;
-
-        Ok(Some(bit_is_set))
-    }
-
-    pub fn read_bit_strict(&mut self) -> Result<bool, io::Error> {
-        match self.read_bit() {
-            Ok(Some(b)) => Ok(b),
-            Ok(None) => Err(io::ErrorKind::UnexpectedEof.into()),
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn drop_rest_of_byte(&mut self) {
-        if self.bit_index > 0 {
-            self.total_bits_read += u64::from(8 - self.bit_index);
-        }
-        self.bit_index = 0;
-        self.byte_picked_apart = None;
-    }
-
-    pub fn total_bits_read(&self) -> u64 { self.total_bits_read }
-}
-impl<R: Read> BitReader<R, true> {
-    pub fn new_msb_to_lsb(byte_reader: R) -> Self {
-        Self::new(byte_reader)
-    }
-}
-impl<R: Read> BitReader<R, false> {
-    pub fn new_lsb_to_msb(byte_reader: R) -> Self {
-        Self::new(byte_reader)
-    }
-}
-
 macro_rules! impl_read_n_bits {
     ($name:ident, $bit_count:expr, $ret_type:ty) => {
         #[must_use]
@@ -119,6 +40,102 @@ macro_rules! impl_read_n_bytes {
         impl_read_n_bytes!($name, $byte_count, $byte_count, $ret_type, $convert_func);
     };
 }
+macro_rules! impl_bit_reader {
+    ($name:ident, $unit_type:ty, $bits_per_unit:expr, $bytes_to_unit_func:ident) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub(crate) struct $name<R: Read, const MSB_TO_LSB: bool> {
+            byte_reader: R,
+            unit_picked_apart: Option<$unit_type>,
+            bit_index: u8,
+            total_bits_read: u64,
+        }
+        impl<R: Read, const MSB_TO_LSB: bool> $name<R, MSB_TO_LSB> {
+            pub fn new(byte_reader: R) -> Self {
+                Self {
+                    byte_reader,
+                    unit_picked_apart: None,
+                    bit_index: 0,
+                    total_bits_read: 0,
+                }
+            }
+
+            pub fn read_bit(&mut self) -> Result<Option<bool>, io::Error> {
+                if self.bit_index == 0 {
+                    // pull in new unit
+                    // bits to bytes conversion rounding up:
+                    let mut buf = [0u8; ($bits_per_unit + (8 - 1)) / 8];
+                    let mut total_bytes_read = 0;
+                    while total_bytes_read < buf.len() {
+                        let now_bytes_read = self.byte_reader.read(&mut buf[total_bytes_read..])?;
+                        if now_bytes_read == 0 {
+                            // EOF
+                            return if total_bytes_read == 0 {
+                                // EOF at start; that's okay
+                                Ok(None)
+                            } else {
+                                // EOF midway; that isn't
+                                Err(io::ErrorKind::UnexpectedEof.into())
+                            };
+                        }
+                        total_bytes_read += now_bytes_read;
+                    }
+                    self.unit_picked_apart = Some(<$unit_type>::$bytes_to_unit_func(buf));
+                }
+
+                // if bit_index > 0, we have already stored a unit
+
+                let byte_picked_apart = self.unit_picked_apart.unwrap();
+                let actual_bit_index = if MSB_TO_LSB {
+                    ($bits_per_unit - 1) - self.bit_index
+                } else {
+                    self.bit_index
+                };
+                let bit_is_set = (byte_picked_apart & (1 << actual_bit_index)) != 0;
+
+                self.bit_index += 1;
+                if self.bit_index == $bits_per_unit {
+                    // prepare for next byte
+                    self.drop_rest_of_unit();
+                }
+
+                self.total_bits_read += 1;
+
+                Ok(Some(bit_is_set))
+            }
+
+            pub fn read_bit_strict(&mut self) -> Result<bool, io::Error> {
+                match self.read_bit() {
+                    Ok(Some(b)) => Ok(b),
+                    Ok(None) => Err(io::ErrorKind::UnexpectedEof.into()),
+                    Err(e) => Err(e),
+                }
+            }
+
+            pub fn drop_rest_of_unit(&mut self) {
+                if self.bit_index > 0 {
+                    self.total_bits_read += u64::from($bits_per_unit - self.bit_index);
+                }
+                self.bit_index = 0;
+                self.unit_picked_apart = None;
+            }
+
+            pub fn total_bits_read(&self) -> u64 { self.total_bits_read }
+        }
+        impl<R: Read> $name<R, true> {
+            pub fn new_msb_to_lsb(byte_reader: R) -> Self {
+                Self::new(byte_reader)
+            }
+        }
+        impl<R: Read> $name<R, false> {
+            pub fn new_lsb_to_msb(byte_reader: R) -> Self {
+                Self::new(byte_reader)
+            }
+        }
+    };
+}
+impl_bit_reader!(BitReader, u8, 8, from_ne_bytes);
+impl_bit_reader!(BitReader16Le, u16, 16, from_le_bytes);
+
 
 impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
     impl_read_n_bits!(read_u1, 1, u8);
@@ -157,6 +174,68 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
         Ok(())
     }
 }
+
+impl<R: Read, const MSB_TO_LSB: bool> BitReader16Le<R, MSB_TO_LSB> {
+    impl_read_n_bits!(read_u1, 1, u8);
+    impl_read_n_bits!(read_u2, 2, u8);
+    impl_read_n_bits!(read_u3, 3, u8);
+    impl_read_n_bits!(read_u4, 4, u8);
+    impl_read_n_bits!(read_u5, 5, u8);
+    impl_read_n_bits!(read_u6, 6, u8);
+    impl_read_n_bits!(read_u7, 7, u8);
+    impl_read_n_bits!(read_u8, 8, u8);
+    impl_read_n_bits!(read_u9, 9, u16);
+    impl_read_n_bits!(read_u10, 10, u16);
+    impl_read_n_bits!(read_u11, 11, u16);
+    impl_read_n_bits!(read_u12, 12, u16);
+    impl_read_n_bits!(read_u13, 13, u16);
+    impl_read_n_bits!(read_u14, 14, u16);
+    impl_read_n_bits!(read_u15, 15, u16);
+    impl_read_n_bits!(read_u16_bitwise, 16, u16);
+
+    #[must_use]
+    pub fn read_u16(&mut self) -> Result<u16, io::Error> {
+        // optimization: are we at a unit boundary?
+        if self.bit_index == 0 {
+            // yes; just read the next unit from the underlying reader
+            let mut buf = [0u8; 2];
+            self.byte_reader.read_exact(&mut buf)?;
+            self.total_bits_read += 16;
+            Ok(u16::from_le_bytes(buf))
+        } else {
+            self.read_u16_bitwise()
+        }
+    }
+
+    impl_read_n_bytes!(read_u16_le, 2, u16, from_le_bytes);
+    impl_read_n_bytes!(read_u16_be, 2, u16, from_be_bytes);
+
+    impl_read_n_bytes!(read_u24_le, 3, 4, u32, from_le_bytes);
+
+    #[must_use]
+    pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
+        for b in buf {
+            *b = self.read_u8()?;
+        }
+        Ok(())
+    }
+}
+
+
+pub trait AnyBitReader {
+    fn read_bit(&mut self) -> Result<Option<bool>, io::Error>;
+}
+impl<R: Read, const MSB_TO_LSB: bool> AnyBitReader for BitReader<R, MSB_TO_LSB> {
+    fn read_bit(&mut self) -> Result<Option<bool>, io::Error> {
+        BitReader::read_bit(self)
+    }
+}
+impl<R: Read, const MSB_TO_LSB: bool> AnyBitReader for BitReader16Le<R, MSB_TO_LSB> {
+    fn read_bit(&mut self) -> Result<Option<bool>, io::Error> {
+        BitReader16Le::read_bit(self)
+    }
+}
+
 
 pub(crate) trait ByteBufReadable {
     fn read(buf: &[u8], pos: &mut usize) -> Self;

@@ -12,7 +12,7 @@ use std::io::{self, Read};
 use tracing::{debug, error};
 
 use crate::huff::{HuffmanCanonicalizable, HuffmanTree};
-use crate::io_util::BitReader;
+use crate::io_util::BitReader16Le;
 use crate::ring_buffer::RingBuffer;
 
 
@@ -435,7 +435,7 @@ enum PreviousLengthType<'a> {
 }
 
 pub struct LzxDecompressor<'r, R: Read> {
-    reader: BitReader<&'r mut R, false>,
+    reader: BitReader16Le<&'r mut R, false>,
     window_size_exponent: usize,
     lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
     recent_lookback: RecentLookback,
@@ -447,7 +447,7 @@ pub struct LzxDecompressor<'r, R: Read> {
 }
 impl<'r, R: Read> LzxDecompressor<'r, R> {
     pub fn new(reader: &'r mut R, window_size_exponent: usize) -> Result<Self, Error> {
-        let mut reader = BitReader::new(reader);
+        let mut reader = BitReader16Le::new(reader);
 
         if window_size_exponent < MIN_WINDOW_SIZE_EXPONENT || window_size_exponent > MAX_WINDOW_SIZE_EXPONENT {
             return Err(Error::InvalidWindowSizeExponent(window_size_exponent));
@@ -464,6 +464,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         } else {
             None
         };
+        debug!("jump translation: {:?}", jump_translation);
 
         // how long are our length lists going to be?
         // main tree is 256 byte values plus NUM_POSITION_SLOTS*8

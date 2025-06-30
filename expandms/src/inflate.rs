@@ -296,8 +296,8 @@ impl<'r, R: Read> Inflater<'r, R> {
             0 => {
                 debug!("block type: no compression");
 
-                // skip remaining bits
-                self.reader.drop_rest_of_byte();
+                // skip remaining bits in the byte
+                self.reader.drop_rest_of_unit();
 
                 // read LEN and NLEN
                 let len = self.reader.read_u16_le()?;

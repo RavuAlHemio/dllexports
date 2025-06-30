@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, Read};
+use std::io;
 
 use tracing::debug;
 
-use crate::io_util::BitReader;
+use crate::io_util::AnyBitReader;
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -134,9 +134,9 @@ impl<T> HuffmanTree<T> {
         }
     }
 
-    pub fn decode_one_from_bit_reader<R: Read, const MSB_TO_LSB: bool>(
+    pub fn decode_one_from_bit_reader<R: AnyBitReader>(
         &self,
-        bit_reader: &mut BitReader<&mut R, MSB_TO_LSB>,
+        bit_reader: &mut R,
     ) -> Result<Option<&T>, io::Error> {
         let mut current_node = &self.root_node;
         let mut first_iteration = true;
