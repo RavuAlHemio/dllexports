@@ -141,3 +141,6 @@ impl From<DecompressionError> for Error {
 impl From<expandms::inflate::Error> for Error {
     fn from(value: expandms::inflate::Error) -> Self { Self::Decompression(DecompressionError::Inflate(value)) }
 }
+impl From<expandms::lzx::Error> for Error {
+    fn from(value: expandms::lzx::Error) -> Self { Self::Decompression(DecompressionError::Lzx(value)) }
+}

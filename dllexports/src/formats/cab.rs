@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use expandms::cab::{CabData, CabFolder, CabHeader, CompressionType, FileInCab, FileInCabAttributes, FolderIndex};
 use expandms::inflate::Inflater;
+use expandms::lzx::LzxDecompressor;
 use expandms::ring_buffer::RingBuffer;
 use expandms::DecompressionError;
 
@@ -174,8 +175,35 @@ impl MultiFileContainer for Cabinet {
             },
             CompressionType::Quantum
                 => return Err(crate::data_mgmt::Error::Decompression(DecompressionError::UnknownCompressionMethod)),
-            CompressionType::Lzx
-                => return Err(crate::data_mgmt::Error::Decompression(DecompressionError::UnknownCompressionMethod)),
+            CompressionType::Lzx => {
+                let mut collector = FileCollector::new(
+                    file.uncompressed_offset_in_folder.try_into().unwrap(),
+                    file.uncompressed_size_bytes.try_into().unwrap(),
+                );
+                for data_block in &self.folder_data[folder_index] {
+                    // make a decompressor
+                    let window_size_exponent = (self.folders[folder_index].compression_parameters >> 4) & 0xFF;
+
+                    let data_slice_length = usize::from(data_block.compressed_byte_count);
+                    let slice = &self.bytes[data_block.data_offset..data_block.data_offset+data_slice_length];
+                    let mut cursor = Cursor::new(slice);
+
+                    let decompressor = LzxDecompressor::new(&mut cursor, window_size_exponent.into())?;
+                    let mut block_decompressor = FileDecompressor::Lzx {
+                        decompressor,
+                    };
+                    loop {
+                        match collector.read(&mut block_decompressor)? {
+                            FileReadStatus::ReadProgress => {},
+                            FileReadStatus::FileComplete => return Ok(collector.decompressed_buffer),
+                            FileReadStatus::DecompressorExhausted => break,
+                        }
+                    }
+                }
+
+                // see above
+                return Err(crate::data_mgmt::Error::Io(io::ErrorKind::UnexpectedEof.into()));
+            },
             CompressionType::Other(_)
                 => return Err(crate::data_mgmt::Error::Decompression(DecompressionError::UnknownCompressionMethod)),
         }
@@ -241,6 +269,9 @@ enum FileDecompressor<'r> {
         inflater: Inflater<'r, Cursor<&'r [u8]>>,
         last_block_read: bool,
     },
+    Lzx {
+        decompressor: LzxDecompressor<'r, Cursor<&'r [u8]>>,
+    },
 }
 impl<'r> FileDecompressor<'r> {
     pub fn decompress_one(&mut self) -> Result<Vec<u8>, crate::data_mgmt::Error> {
@@ -260,6 +291,13 @@ impl<'r> FileDecompressor<'r> {
                 }
                 Ok(buf)
             },
+            Self::Lzx { decompressor } => {
+                let mut buf = Vec::new();
+                loop {
+                    decompressor.decompress_block(&mut buf)?;
+                }
+                Ok(buf)
+            },
         }
     }
 
@@ -267,6 +305,7 @@ impl<'r> FileDecompressor<'r> {
         match self {
             Self::NoCompression(_) => None,
             Self::MsZip { inflater, .. } => Some(inflater),
+            Self::Lzx { .. } => None,
         }
     }
 }

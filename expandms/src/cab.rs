@@ -147,7 +147,8 @@ bitflags! {
 pub struct CabFolder {
     pub start_offset: u32,
     pub data_count: u16,
-    pub compression_type: CompressionType, // u16
+    pub compression_type: CompressionType, // u4
+    pub compression_parameters: u16, // u12
     pub reserved_data: Vec<u8>, // [u8; header.folder_reserved_length.unwrap_or(0)]
 }
 impl CabFolder {
@@ -157,7 +158,11 @@ impl CabFolder {
         let mut pos = 0;
         let start_offset = ReadEndian::read_le(&fixed_part_buf, &mut pos);
         let data_count = ReadEndian::read_le(&fixed_part_buf, &mut pos);
-        let compression_type = CompressionType::from_base_type(ReadEndian::read_le(&fixed_part_buf, &mut pos));
+        let compression_type_and_parameters: u16 = ReadEndian::read_le(&fixed_part_buf, &mut pos);
+        let compression_type = CompressionType::from_base_type(
+            ((compression_type_and_parameters >> 0) & 0x000F).try_into().unwrap()
+        );
+        let compression_parameters = (compression_type_and_parameters >> 4) & 0xFFF;
 
         let mut reserved_data = vec![0u8; header.folder_reserved_length.unwrap_or(0).into()];
         reader.read_exact(&mut reserved_data)?;
@@ -166,6 +171,7 @@ impl CabFolder {
             start_offset,
             data_count,
             compression_type,
+            compression_parameters,
             reserved_data,
         })
     }
@@ -173,13 +179,13 @@ impl CabFolder {
 
 
 #[derive(Clone, Copy, Debug)]
-#[from_to_other(base_type = u16, derive_compare = "as_int")]
+#[from_to_other(base_type = u8, derive_compare = "as_int")]
 pub enum CompressionType {
-    NoCompression = 0x0000,
-    MsZip = 0x0001,
-    Quantum = 0x0002,
-    Lzx = 0x0003,
-    Other(u16),
+    NoCompression = 0x00,
+    MsZip = 0x01,
+    Quantum = 0x02,
+    Lzx = 0x03,
+    Other(u8),
 }
 impl Default for CompressionType {
     fn default() -> Self { Self::NoCompression }
