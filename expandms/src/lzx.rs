@@ -437,7 +437,7 @@ enum PreviousLengthType<'a> {
 pub struct LzxDecompressor<'r, R: Read> {
     reader: BitReader<&'r mut R, false>,
     window_size_exponent: usize,
-    lookback: Box<RingBuffer<u8, MAX_LOOKBACK_DISTANCE>>,
+    lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
     recent_lookback: RecentLookback,
     jump_translation: Option<u32>,
 
@@ -475,7 +475,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         Ok(Self {
             reader,
             window_size_exponent,
-            lookback: Box::new(RingBuffer::new(0x00)),
+            lookback: RingBuffer::new(0x00),
             recent_lookback: RecentLookback::new(),
             jump_translation,
 

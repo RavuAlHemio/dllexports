@@ -1,11 +1,11 @@
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RingBuffer<T: Copy, const SIZE: usize> {
-    buffer: [T; SIZE],
+    buffer: Box<[T]>,
     position: usize,
 }
 impl<T: Copy, const SIZE: usize> RingBuffer<T, SIZE> {
     pub fn new(initial_value: T) -> Self {
-        let buffer = [initial_value; SIZE];
+        let buffer = vec![initial_value; SIZE].into_boxed_slice();
         Self {
             buffer,
             position: 0,
