@@ -9,6 +9,7 @@
 use std::fmt;
 use std::io::{self, Read};
 
+use display_bytes::{DisplayBytesSlice, HexBytesSlice};
 use tracing::{debug, error};
 
 use crate::huff::{HuffmanCanonicalizable, HuffmanTree};
@@ -455,10 +456,12 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
 
         let has_jump_translation = reader.read_bit_strict()?;
         let jump_translation = if has_jump_translation {
+            debug!("reading jump translation");
             // basically stored as middle-endian
             // (22 33 00 11)
             let top_half = u32::from(reader.read_u16_le()?);
             let bottom_half = u32::from(reader.read_u16_le()?);
+            debug!("top half {:#X}, bottom half {:#X}", top_half, bottom_half);
             let full = (top_half << 16) | bottom_half;
             Some(full)
         } else {
@@ -491,6 +494,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         for length in &mut lengths {
             *length = self.reader.read_u4()?.into();
         }
+        debug!("pre-tree lengths: {:?}", lengths);
         match HuffmanTree::new_canonical(&lengths) {
             Ok(ht) => Ok(ht),
             Err(e) => {
@@ -516,10 +520,12 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             match pre_tree_value {
                 PreTreeCode::LengthDelta(delta) => {
                     ret[i] = (prev_lengths[i] + usize::from(delta)) % 17;
+                    debug!("building tree: delta length gives {}", ret[i]);
                     i += 1;
                 },
                 PreTreeCode::ZeroesShort => {
                     let zero_count = self.reader.read_u4()? + 4;
+                    debug!("building tree: short zero run of {} items", zero_count);
                     for _ in 0..zero_count {
                         ret[i] = 0;
                         i += 1;
@@ -527,6 +533,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 },
                 PreTreeCode::ZeroesLong => {
                     let zero_count = self.reader.read_u5()? + 20;
+                    debug!("building tree: long zero run of {} items", zero_count);
                     for _ in 0..zero_count {
                         ret[i] = 0;
                         i += 1;
@@ -543,6 +550,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                         PreTreeCode::ZeroesShort => return Err(Error::InvalidSecondPreTreeValue("ZeroesShort")),
                         PreTreeCode::Repeat => return Err(Error::InvalidSecondPreTreeValue("Repeat")),
                     };
+                    debug!("building tree: repeat run of {} items with delta {:#04X}", repeat_count, new_delta);
                     for _ in 0..repeat_count {
                         ret[i] = (prev_lengths[i] + usize::from(new_delta)) % 17;
                         i += 1;
@@ -550,12 +558,14 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 },
             }
         }
+        debug!("final lengths: {:?}", ret);
         Ok(ret)
     }
 
     pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<(), Error> {
         let block_type = self.reader.read_u3()?;
         let num_uncompressed_bytes = {
+            // 24 bits, big endian
             let mut buf = [0u8; 4];
             for b in &mut buf[1..4] {
                 *b = self.reader.read_u8()?;
@@ -625,6 +635,8 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                     },
                 };
 
+                debug!("trees are constructed, let's go!");
+
                 let mut bytes_output = 0;
                 while bytes_output < num_uncompressed_bytes {
                     // decode an element from the main tree
@@ -635,6 +647,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                             // this one's easy to handle
                             self.lookback.push(*b);
                             dest_buffer.push(*b);
+                            debug!("outputting literal byte {:#04X}", b);
                             bytes_output += 1;
                         },
                         MainTreeCode::Lookback { offset, length_header } => {
@@ -660,6 +673,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                     // aligned block; some of those extra bits might be aligned bits
                                     if extra_bit_count >= 3 {
                                         // the three bottommost bits are aligned bits, the rest are verbatim bits
+                                        debug!("{} verbatim bits, 3 aligned bits", extra_bit_count - 3);
 
                                         // we have max. 17 extra bits, so they will fit into u32
                                         assert!(extra_bit_count <= 17);
@@ -681,6 +695,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                         (verbatim_bits, aligned_bits)
                                     } else {
                                         // 0..=2 extra bits => no aligned bits
+                                        debug!("{} verbatim bits, 0 aligned bits", extra_bit_count);
                                         assert!(extra_bit_count <= 17);
                                         let mut verbatim_bits = 0u32;
                                         for _ in 0..extra_bit_count {
@@ -694,6 +709,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                     }
                                 } else {
                                     // verbatim block, no aligned bits
+                                    debug!("{} verbatim bits, no aligned bits", extra_bit_count);
                                     assert!(extra_bit_count <= 17);
                                     let mut verbatim_bits = 0u32;
                                     for _ in 0..(extra_bit_count-3) {
@@ -706,11 +722,19 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                     (verbatim_bits, 0)
                                 };
 
+                                debug!(
+                                    "lookback offset consists of base {} + verbatim {} + aligned {}",
+                                    POSITION_SLOT_NUMBER_TO_POSITION_BASE[u32_to_usize(position_slot_number)],
+                                    verbatim_bits,
+                                    aligned_bits,
+                                );
+
                                 let formatted_offset =
                                     POSITION_SLOT_NUMBER_TO_POSITION_BASE[u32_to_usize(position_slot_number)]
                                     + verbatim_bits
                                     + aligned_bits;
                                 let actual_match_offset = formatted_offset - 2;
+                                debug!("lookback offset is {}", actual_match_offset);
 
                                 // remember this for next time
                                 self.recent_lookback.push(actual_match_offset);
@@ -718,15 +742,18 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                 actual_match_offset
                             } else {
                                 // relative offsets are already complete
+                                debug!("lookback offset is {} again", match_offset_value);
                                 match_offset_value
                             };
 
                             // gimme
                             let mut buffer = self.lookback.recall(u32_to_usize(match_offset), u32_to_usize(match_length));
                             bytes_output += match_length;
+                            debug!("outputting lookback bytes: {}", HexBytesSlice::from(buffer.as_slice()));
                             dest_buffer.append(&mut buffer);
                         },
                     }
+                    debug!("{}/{} bytes output ({})", bytes_output, num_uncompressed_bytes, DisplayBytesSlice::from(dest_buffer.as_slice()));
                 }
             },
             3 => {
@@ -752,9 +779,11 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 let mut buf = vec![0u8; u32_to_usize(num_uncompressed_bytes)];
                 self.reader.read_exact(&mut buf)?;
 
+                debug!("outputting uncompressed bytes: {}", HexBytesSlice::from(buf.as_slice()));
                 if num_uncompressed_bytes % 2 == 1 {
                     // read an additional byte to realign to u16
                     let mut byte_buf = [0u8];
+                    debug!("reading alignment byte");
                     self.reader.read_exact(&mut byte_buf)?;
                 }
             },

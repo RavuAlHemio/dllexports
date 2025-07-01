@@ -1,6 +1,7 @@
 use std::io::{self, Read};
 
 use display_bytes::DisplayBytes;
+use tracing::debug;
 
 
 macro_rules! impl_read_n_bits {
@@ -21,6 +22,7 @@ macro_rules! impl_read_n_bits {
                     }
                 }
             }
+            debug!("reading {} bits gave {:#X}", $bit_count, ret);
             Ok(ret)
         }
     };
@@ -92,6 +94,8 @@ macro_rules! impl_bit_reader {
                 };
                 let bit_is_set = (byte_picked_apart & (1 << actual_bit_index)) != 0;
 
+                debug!("bit read: {}", if bit_is_set { "1" } else { "0" });
+
                 self.bit_index += 1;
                 if self.bit_index == $bits_per_unit {
                     // prepare for next byte
@@ -155,6 +159,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader<R, MSB_TO_LSB> {
             let mut buf = [0u8];
             self.byte_reader.read_exact(&mut buf)?;
             self.total_bits_read += 8;
+            debug!("reading 8 bits (speedy) gave {:#X}", buf[0]);
             Ok(buf[0])
         } else {
             self.read_u8_bitwise()
@@ -201,6 +206,7 @@ impl<R: Read, const MSB_TO_LSB: bool> BitReader16Le<R, MSB_TO_LSB> {
             let mut buf = [0u8; 2];
             self.byte_reader.read_exact(&mut buf)?;
             self.total_bits_read += 16;
+            debug!("reading 16 bits (speedy) gave {:#X}", u16::from_le_bytes(buf));
             Ok(u16::from_le_bytes(buf))
         } else {
             self.read_u16_bitwise()
