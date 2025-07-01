@@ -436,7 +436,7 @@ enum PreviousLengthType<'a> {
 }
 
 pub struct LzxDecompressor<'r, R: Read> {
-    reader: BitReader16Le<&'r mut R, false>,
+    reader: BitReader16Le<&'r mut R, true>,
     window_size_exponent: usize,
     lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
     recent_lookback: RecentLookback,
@@ -519,7 +519,12 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 .ok_or_else(|| Error::new_eof())?;
             match pre_tree_value {
                 PreTreeCode::LengthDelta(delta) => {
-                    ret[i] = (prev_lengths[i] + usize::from(delta)) % 17;
+                    let delta_usize = usize::from(delta);
+                    ret[i] = if prev_lengths[i] < delta_usize {
+                        (prev_lengths[i] + 17) - delta_usize
+                    } else {
+                        prev_lengths[i] - delta_usize
+                    };
                     debug!("building tree: delta length gives {}", ret[i]);
                     i += 1;
                 },
@@ -552,7 +557,12 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                     };
                     debug!("building tree: repeat run of {} items with delta {:#04X}", repeat_count, new_delta);
                     for _ in 0..repeat_count {
-                        ret[i] = (prev_lengths[i] + usize::from(new_delta)) % 17;
+                        let new_delta_usize = usize::from(new_delta);
+                        ret[i] = if prev_lengths[i] < new_delta_usize {
+                            (prev_lengths[i] + 17) - new_delta_usize
+                        } else {
+                            prev_lengths[i] - new_delta_usize
+                        };
                         i += 1;
                     }
                 },
@@ -712,7 +722,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                                     debug!("{} verbatim bits, no aligned bits", extra_bit_count);
                                     assert!(extra_bit_count <= 17);
                                     let mut verbatim_bits = 0u32;
-                                    for _ in 0..(extra_bit_count-3) {
+                                    for _ in 0..extra_bit_count {
                                         verbatim_bits <<= 1;
                                         if self.reader.read_bit_strict()? {
                                             verbatim_bits |= 1;
@@ -755,6 +765,9 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                     }
                     debug!("{}/{} bytes output ({})", bytes_output, num_uncompressed_bytes, DisplayBytesSlice::from(dest_buffer.as_slice()));
                 }
+
+                // realign to next 16 bits
+                self.reader.drop_rest_of_unit();
             },
             3 => {
                 // uncompressed block
@@ -780,6 +793,8 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 self.reader.read_exact(&mut buf)?;
 
                 debug!("outputting uncompressed bytes: {}", HexBytesSlice::from(buf.as_slice()));
+                dest_buffer.append(&mut buf);
+
                 if num_uncompressed_bytes % 2 == 1 {
                     // read an additional byte to realign to u16
                     let mut byte_buf = [0u8];
