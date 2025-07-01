@@ -7,6 +7,7 @@ use expandms::inflate::Inflater;
 use expandms::lzx::LzxDecompressor;
 use expandms::ring_buffer::RingBuffer;
 use expandms::DecompressionError;
+use tracing::debug;
 
 use crate::data_mgmt::MultiFileContainer;
 
@@ -191,6 +192,7 @@ impl MultiFileContainer for Cabinet {
                     let decompressor = LzxDecompressor::new(&mut cursor, window_size_exponent.into())?;
                     let mut block_decompressor = FileDecompressor::Lzx {
                         decompressor,
+                        uncompressed_length: usize::from(data_block.uncompressed_byte_count),
                     };
                     loop {
                         match collector.read(&mut block_decompressor)? {
@@ -271,6 +273,7 @@ enum FileDecompressor<'r> {
     },
     Lzx {
         decompressor: LzxDecompressor<'r, Cursor<&'r [u8]>>,
+        uncompressed_length: usize,
     },
 }
 impl<'r> FileDecompressor<'r> {
@@ -291,9 +294,10 @@ impl<'r> FileDecompressor<'r> {
                 }
                 Ok(buf)
             },
-            Self::Lzx { decompressor } => {
+            Self::Lzx { decompressor, uncompressed_length } => {
                 let mut buf = Vec::new();
-                loop {
+                while buf.len() < *uncompressed_length {
+                    debug!("decompressing next LZX block");
                     decompressor.decompress_block(&mut buf)?;
                 }
                 Ok(buf)
