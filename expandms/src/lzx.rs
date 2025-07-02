@@ -440,7 +440,7 @@ pub struct LzxDecompressor<'r, R: Read> {
     window_size_exponent: usize,
     lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
     recent_lookback: RecentLookback,
-    jump_translation: Option<u32>,
+    jump_translation: Option<i32>,
     position_for_jump_translation: u32,
 
     last_main_256_lengths: Box<[usize; 256]>,
@@ -463,7 +463,9 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             let top_half = u32::from(reader.read_u16_le()?);
             let bottom_half = u32::from(reader.read_u16_le()?);
             debug!("top half {:#X}, bottom half {:#X}", top_half, bottom_half);
-            let full = (top_half << 16) | bottom_half;
+            let full_u32 = (top_half << 16) | bottom_half;
+            // bitcast to signed
+            let full = full_u32 as i32;
             Some(full)
         } else {
             None
@@ -676,6 +678,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                             };
 
                             // how far back is it?
+                            debug!("encoded offset is {:?}, recents are {:?}", offset, self.recent_lookback);
                             let (match_offset_value, is_absolute) = self.recent_lookback.lookup(*offset);
                             let match_offset = if is_absolute {
                                 let position_slot_number = match_offset_value;
@@ -811,6 +814,8 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             other => return Err(Error::UnknownBlockType(other)),
         }
 
+        debug!("orig_dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
+
         // jump translation?
         if let Some(jump_translation) = self.jump_translation {
             let new_buf_size = usize_to_u32(dest_buffer.len());
@@ -818,14 +823,53 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             let chunk_offset = self.position_for_jump_translation.wrapping_sub(chunk_size);
             if chunk_offset < 0x4000_0000 && chunk_size > 10 {
                 let relative_offset = u32_to_usize(original_buf_size);
-                for relative_i in 0..u32_to_usize(chunk_size)-10 {
+                let mut relative_i = 0;
+                while relative_i < u32_to_usize(chunk_size)-10 {
                     let i = relative_i + relative_offset;
                     if dest_buffer[i] == 0xE8 {
-                        todo!();
+                        debug!("E8 jump translation");
+                        let current_pointer_u32 = chunk_offset + usize_to_u32(i);
+                        // bit-cast to signed
+                        let current_pointer = current_pointer_u32 as i32;
+                        debug!("e8 curptr: {0:11} {0:#010X}", current_pointer);
+                        let value_u32 =
+                            (u32::from(dest_buffer[i+1]) <<  0) |
+                            (u32::from(dest_buffer[i+2]) <<  8) |
+                            (u32::from(dest_buffer[i+3]) << 16) |
+                            (u32::from(dest_buffer[i+4]) << 24);
+                        let value = value_u32 as i32;
+                        debug!("e8  value: {0:11} {0:#010X}", value);
+                        debug!("e8 -curpt: {0:11} {0:#010X}", -current_pointer);
+                        debug!("e8 jmptsl: {0:11} {0:#010X}", jump_translation);
+                        debug!("e8     if: {:11} ?>=? {:11} && {:11} ?<? {:11}", value, -current_pointer, value, jump_translation);
+                        debug!("e8     if: {:#010X} ?>=? {:#010X} && {:#010X} ?<? {:#010X}", value, -current_pointer, value, jump_translation);
+                        debug!(
+                            "e8     if: {} && {}",
+                            if value >= -current_pointer { "true " } else { "false" },
+                            if value < jump_translation { "true " } else { "false" },
+                        );
+                        if value >= -current_pointer && value < jump_translation {
+                            debug!("e8 displace!");
+                            let displacement_i32 = if value >= 0 {
+                                value.wrapping_sub(current_pointer)
+                            } else {
+                                value.wrapping_add(jump_translation)
+                            };
+                            debug!("e8 displc: {0:11} {0:#010X}", displacement_i32);
+                            let displacement = displacement_i32 as u32;
+                            dest_buffer[i+1] = u8::try_from((displacement >>  0) & 0xFF).unwrap();
+                            dest_buffer[i+2] = u8::try_from((displacement >>  8) & 0xFF).unwrap();
+                            dest_buffer[i+3] = u8::try_from((displacement >> 16) & 0xFF).unwrap();
+                            dest_buffer[i+4] = u8::try_from((displacement >> 24) & 0xFF).unwrap();
+                        }
+                        relative_i += 4;
                     }
+                    relative_i += 1;
                 }
             }
         }
+
+        debug!("dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
 
         Ok(())
     }
