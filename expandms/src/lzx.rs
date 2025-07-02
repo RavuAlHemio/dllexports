@@ -207,16 +207,6 @@ pub enum Error {
     ConstructingMainTree,
     ConstructingLengthTree,
     ConstructingAlignedOffsetTree,
-
-    BuildingDefinitionTree,
-    DecodingDefinitionValue,
-    NoPreviousCodeLength,
-    BuildingValueTree,
-    BuildingDistanceTree,
-    ReadingValue,
-    ReadingDistance,
-    InvalidDefinitionValue,
-    InvalidValue,
 }
 impl Error {
     pub fn new_eof() -> Self {
@@ -248,24 +238,6 @@ impl fmt::Display for Error {
                 => write!(f, "error constructing length tree"),
             Self::ConstructingAlignedOffsetTree
                 => write!(f, "error constructing aligned offset tree"),
-            Self::BuildingDefinitionTree
-                => write!(f, "error building definition tree"),
-            Self::DecodingDefinitionValue
-                => write!(f, "error decoding definition value"),
-            Self::NoPreviousCodeLength
-                => write!(f, "referring to yet-unset previous code length"),
-            Self::BuildingValueTree
-                => write!(f, "error building value tree"),
-            Self::BuildingDistanceTree
-                => write!(f, "error building distance tree"),
-            Self::ReadingValue
-                => write!(f, "error reading value"),
-            Self::ReadingDistance
-                => write!(f, "error reading distance"),
-            Self::InvalidDefinitionValue
-                => write!(f, "invalid definition value returned from tree"),
-            Self::InvalidValue
-                => write!(f, "invalid value returned from tree"),
         }
     }
 }
@@ -280,15 +252,6 @@ impl std::error::Error for Error {
             Self::ConstructingMainTree => None,
             Self::ConstructingLengthTree => None,
             Self::ConstructingAlignedOffsetTree => None,
-            Self::BuildingDefinitionTree => None,
-            Self::DecodingDefinitionValue => None,
-            Self::NoPreviousCodeLength => None,
-            Self::BuildingValueTree => None,
-            Self::BuildingDistanceTree => None,
-            Self::ReadingValue => None,
-            Self::ReadingDistance => None,
-            Self::InvalidDefinitionValue => None,
-            Self::InvalidValue => None,
         }
     }
 }
