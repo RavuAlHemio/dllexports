@@ -145,18 +145,18 @@ impl HuffmanCanonicalizable for Offset {
     }
 }
 
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct RecentLookback {
     r0: u32,
     r1: u32,
     r2: u32,
 }
 impl RecentLookback {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            r0: 0,
-            r1: 0,
-            r2: 0,
+            r0: 1,
+            r1: 1,
+            r2: 1,
         }
     }
 
@@ -193,7 +193,7 @@ impl RecentLookback {
 }
 impl Default for RecentLookback {
     fn default() -> Self {
-        Self { r0: 1, r1: 1, r2: 1 }
+        Self::new()
     }
 }
 
