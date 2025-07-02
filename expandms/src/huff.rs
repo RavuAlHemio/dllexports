@@ -194,8 +194,8 @@ impl<T: HuffmanCanonicalizable> HuffmanTree<T> {
     /// A 0 value in `symbol_lengths` is a "skip", i.e. the corresponding symbol shall not be
     /// encodable through the resulting Huffman tree.
     pub fn new_canonical(symbol_lengths: &[usize]) -> Result<Self, HuffmanConstructionError> {
-        // at least one length; all lengths greater than zero
-        assert!(symbol_lengths.len() > 0);
+        // at least one symbol with length > 0
+        assert!(symbol_lengths.iter().any(|sl| *sl > 0));
 
         // convert to pairs of symbol and symbol length
         let mut lengths_and_symbols = Vec::with_capacity(symbol_lengths.len());
