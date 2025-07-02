@@ -441,6 +441,7 @@ pub struct LzxDecompressor<'r, R: Read> {
     lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
     recent_lookback: RecentLookback,
     jump_translation: Option<u32>,
+    position_for_jump_translation: u32,
 
     last_main_256_lengths: Box<[usize; 256]>,
     last_main_rest_lengths: Vec<usize>,
@@ -482,6 +483,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             lookback: RingBuffer::new(0x00),
             recent_lookback: RecentLookback::new(),
             jump_translation,
+            position_for_jump_translation: 0,
 
             last_main_256_lengths: Box::new([0; 256]),
             last_main_rest_lengths: vec![0; main_tree_rest_entries],
@@ -573,6 +575,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
     }
 
     pub fn decompress_block(&mut self, dest_buffer: &mut Vec<u8>) -> Result<(), Error> {
+        let original_buf_size = usize_to_u32(dest_buffer.len());
         let block_type = self.reader.read_u3()?;
         let num_uncompressed_bytes = {
             // 24 bits, big endian
@@ -659,6 +662,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                             dest_buffer.push(*b);
                             debug!("outputting literal byte {:#04X}", b);
                             bytes_output += 1;
+                            self.position_for_jump_translation = self.position_for_jump_translation.wrapping_add(1);
                         },
                         MainTreeCode::Lookback { offset, length_header } => {
                             // okay, how long is the match?
@@ -759,6 +763,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                             // gimme
                             let mut buffer = self.lookback.recall(u32_to_usize(match_offset), u32_to_usize(match_length));
                             bytes_output += match_length;
+                            self.position_for_jump_translation = self.position_for_jump_translation.wrapping_add(match_length);
                             debug!("outputting lookback bytes: {}", HexBytesSlice::from(buffer.as_slice()));
                             dest_buffer.append(&mut buffer);
                         },
@@ -791,6 +796,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
 
                 let mut buf = vec![0u8; u32_to_usize(num_uncompressed_bytes)];
                 self.reader.read_exact(&mut buf)?;
+                self.position_for_jump_translation = self.position_for_jump_translation.wrapping_add(num_uncompressed_bytes);
 
                 debug!("outputting uncompressed bytes: {}", HexBytesSlice::from(buf.as_slice()));
                 dest_buffer.append(&mut buf);
@@ -804,6 +810,23 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             },
             other => return Err(Error::UnknownBlockType(other)),
         }
+
+        // jump translation?
+        if let Some(jump_translation) = self.jump_translation {
+            let new_buf_size = usize_to_u32(dest_buffer.len());
+            let chunk_size = new_buf_size - original_buf_size;
+            let chunk_offset = self.position_for_jump_translation.wrapping_sub(chunk_size);
+            if chunk_offset < 0x4000_0000 && chunk_size > 10 {
+                let relative_offset = u32_to_usize(original_buf_size);
+                for relative_i in 0..u32_to_usize(chunk_size)-10 {
+                    let i = relative_i + relative_offset;
+                    if dest_buffer[i] == 0xE8 {
+                        todo!();
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
