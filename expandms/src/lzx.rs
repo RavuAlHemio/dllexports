@@ -207,6 +207,7 @@ pub enum Error {
     ConstructingMainTree,
     ConstructingLengthTree,
     ConstructingAlignedOffsetTree,
+    LongLengthEmptyLengthTree,
 }
 impl Error {
     pub fn new_eof() -> Self {
@@ -238,6 +239,8 @@ impl fmt::Display for Error {
                 => write!(f, "error constructing length tree"),
             Self::ConstructingAlignedOffsetTree
                 => write!(f, "error constructing aligned offset tree"),
+            Self::LongLengthEmptyLengthTree
+                => write!(f, "long length has been specified but length tree is empty"),
         }
     }
 }
@@ -252,6 +255,7 @@ impl std::error::Error for Error {
             Self::ConstructingMainTree => None,
             Self::ConstructingLengthTree => None,
             Self::ConstructingAlignedOffsetTree => None,
+            Self::LongLengthEmptyLengthTree => None,
         }
     }
 }
@@ -605,12 +609,16 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                 let pre_tree_length = self.read_pre_tree()?;
                 let length_lengths = self.read_length_delta_tree(&pre_tree_length, PreviousLengthType::Length)?;
                 self.last_length_lengths.copy_from_slice(&length_lengths);
-                let length_tree: HuffmanTree<u32> = match HuffmanTree::new_canonical(&length_lengths) {
-                    Ok(mt) => mt,
-                    Err(e) => {
-                        error!("error building length tree: {}", e);
-                        return Err(Error::ConstructingLengthTree);
-                    },
+                let length_tree_opt: Option<HuffmanTree<u32>> = if length_lengths.iter().all(|ll| *ll == 0) {
+                    None
+                } else {
+                    match HuffmanTree::new_canonical(&length_lengths) {
+                        Ok(mt) => Some(mt),
+                        Err(e) => {
+                            error!("error building length tree: {}", e);
+                            return Err(Error::ConstructingLengthTree);
+                        },
+                    }
                 };
 
                 debug!("trees are constructed, let's go!");
@@ -632,10 +640,14 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                         MainTreeCode::Lookback { offset, length_header } => {
                             // okay, how long is the match?
                             let match_length = if length_header.is_max() {
-                                // at least 7 but possibly more; decode using the length table
-                                let tree_length = length_tree.decode_one_from_bit_reader(&mut self.reader)?
-                                    .ok_or_else(|| Error::new_eof())?;
-                                *tree_length + 7 + 2
+                                // at least 7 but possibly more; decode using the length tree
+                                if let Some(length_tree) = length_tree_opt.as_ref() {
+                                    let tree_length = length_tree.decode_one_from_bit_reader(&mut self.reader)?
+                                        .ok_or_else(|| Error::new_eof())?;
+                                    *tree_length + 7 + 2
+                                } else {
+                                    return Err(Error::LongLengthEmptyLengthTree);
+                                }
                             } else {
                                 u32::from(length_header.as_u8()) + 2
                             };
