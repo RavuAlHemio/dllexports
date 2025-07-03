@@ -523,14 +523,15 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                         PreTreeCode::ZeroesShort => return Err(Error::InvalidSecondPreTreeValue("ZeroesShort")),
                         PreTreeCode::Repeat => return Err(Error::InvalidSecondPreTreeValue("Repeat")),
                     };
-                    debug!("building tree: repeat run of {} items with delta {:#04X}", repeat_count, new_delta);
+                    let new_delta_usize = usize::from(new_delta);
+                    let new_value = if prev_lengths[i] < new_delta_usize {
+                        (prev_lengths[i] + 17) - new_delta_usize
+                    } else {
+                        prev_lengths[i] - new_delta_usize
+                    };
+                    debug!("building tree: repeat run of {} items with value {}", repeat_count, new_value);
                     for _ in 0..repeat_count {
-                        let new_delta_usize = usize::from(new_delta);
-                        ret[i] = if prev_lengths[i] < new_delta_usize {
-                            (prev_lengths[i] + 17) - new_delta_usize
-                        } else {
-                            prev_lengths[i] - new_delta_usize
-                        };
+                        ret[i] = new_value;
                         i += 1;
                     }
                 },
