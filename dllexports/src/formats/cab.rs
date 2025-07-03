@@ -181,25 +181,34 @@ impl MultiFileContainer for Cabinet {
                     file.uncompressed_offset_in_folder.try_into().unwrap(),
                     file.uncompressed_size_bytes.try_into().unwrap(),
                 );
-                for data_block in &self.folder_data[folder_index] {
-                    // make a decompressor
-                    let window_size_exponent = (self.folders[folder_index].compression_parameters >> 4) & 0xFF;
 
-                    let data_slice_length = usize::from(data_block.compressed_byte_count);
-                    let slice = &self.bytes[data_block.data_offset..data_block.data_offset+data_slice_length];
-                    let mut cursor = Cursor::new(slice);
+                // make the magic reader that reads all blocks
+                let mut all_blocks_reader = CabFolderReader::new(
+                    Cursor::new(self.bytes.as_slice()),
+                    self.folder_data[folder_index].clone(),
+                );
 
-                    let decompressor = LzxDecompressor::new(&mut cursor, window_size_exponent.into())?;
-                    let mut block_decompressor = FileDecompressor::Lzx {
-                        decompressor,
-                        uncompressed_length: usize::from(data_block.uncompressed_byte_count),
-                    };
-                    loop {
-                        match collector.read(&mut block_decompressor)? {
-                            FileReadStatus::ReadProgress => {},
-                            FileReadStatus::FileComplete => return Ok(collector.decompressed_buffer),
-                            FileReadStatus::DecompressorExhausted => break,
-                        }
+                // make a decompressor
+                let window_size_exponent = (self.folders[folder_index].compression_parameters >> 4) & 0xFF;
+                let decompressor = LzxDecompressor::new(
+                    &mut all_blocks_reader,
+                    window_size_exponent.into(),
+                )?;
+
+                let total_uncompressed_length = self.folder_data[folder_index]
+                    .iter()
+                    .map(|fd| usize::from(fd.uncompressed_byte_count))
+                    .sum();
+
+                let mut block_decompressor = FileDecompressor::Lzx {
+                    decompressor,
+                    uncompressed_length: total_uncompressed_length,
+                };
+                loop {
+                    match collector.read(&mut block_decompressor)? {
+                        FileReadStatus::ReadProgress => {},
+                        FileReadStatus::FileComplete => return Ok(collector.decompressed_buffer),
+                        FileReadStatus::DecompressorExhausted => break,
                     }
                 }
 
@@ -272,7 +281,7 @@ enum FileDecompressor<'r> {
         last_block_read: bool,
     },
     Lzx {
-        decompressor: LzxDecompressor<'r, Cursor<&'r [u8]>>,
+        decompressor: LzxDecompressor<'r, CabFolderReader<Cursor<&'r [u8]>>>,
         uncompressed_length: usize,
     },
 }
@@ -297,7 +306,7 @@ impl<'r> FileDecompressor<'r> {
             Self::Lzx { decompressor, uncompressed_length } => {
                 let mut buf = Vec::new();
                 while buf.len() < *uncompressed_length {
-                    debug!("decompressing next LZX block");
+                    debug!("decompressing next LZX block ({}/{})", buf.len(), uncompressed_length);
                     decompressor.decompress_block(&mut buf)?;
                 }
                 Ok(buf)
@@ -310,6 +319,62 @@ impl<'r> FileDecompressor<'r> {
             Self::NoCompression(_) => None,
             Self::MsZip { inflater, .. } => Some(inflater),
             Self::Lzx { .. } => None,
+        }
+    }
+}
+
+pub(crate) struct CabFolderReader<R: Read + Seek> {
+    reader: R,
+    folder_data: Vec<CabData>,
+
+    data_index: usize,
+    data_pos: u16,
+}
+impl<R: Read + Seek> CabFolderReader<R> {
+    pub fn new(reader: R, folder_data: Vec<CabData>) -> Self {
+        Self {
+            reader,
+            folder_data,
+
+            data_index: 0,
+            data_pos: 0,
+        }
+    }
+}
+impl<R: Read + Seek> Read for CabFolderReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+
+        loop {
+            if self.data_index >= self.folder_data.len() {
+                // EOF
+                return Ok(0);
+            }
+
+            let data_block = &self.folder_data[self.data_index];
+            if self.data_pos >= data_block.compressed_byte_count {
+                // advance to the next block
+                self.data_index += 1;
+                self.data_pos = 0;
+                continue;
+            }
+            if self.data_pos == 0 {
+                // seek to beginning of block
+                self.reader.seek(SeekFrom::Start(u64::try_from(data_block.data_offset).unwrap()))?;
+            }
+
+            // read either the rest of the current block or enough to fill the buffer
+            // (whichever is shorter)
+            let rest_of_block_len = data_block.compressed_byte_count - self.data_pos;
+            let read_count = usize::from(rest_of_block_len)
+                .min(buf.len());
+            let actually_read = self.reader.read(&mut buf[..read_count])?;
+            assert!(actually_read <= read_count);
+            self.data_pos += u16::try_from(actually_read).unwrap();
+
+            return Ok(actually_read);
         }
     }
 }
