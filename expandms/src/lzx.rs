@@ -425,12 +425,9 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         let has_jump_translation = reader.read_bit_strict()?;
         let jump_translation = if has_jump_translation {
             debug!("reading jump translation");
-            // basically stored as middle-endian
-            // (22 33 00 11)
-            let top_half = u32::from(reader.read_u16_le()?);
-            let bottom_half = u32::from(reader.read_u16_le()?);
-            debug!("top half {:#X}, bottom half {:#X}", top_half, bottom_half);
-            let full_u32 = (top_half << 16) | bottom_half;
+            let mut buf = [0u8; 4];
+            reader.read_exact(&mut buf)?;
+            let full_u32 = u32::from_be_bytes(buf);
             // bitcast to signed
             let full = full_u32 as i32;
             Some(full)
@@ -746,7 +743,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                             dest_buffer.append(&mut buffer);
                         },
                     }
-                    debug!("{}/{} bytes output ({})", bytes_output, num_uncompressed_bytes, DisplayBytesSlice::from(dest_buffer.as_slice()));
+                    // debug!("{}/{} bytes output ({})", bytes_output, num_uncompressed_bytes, DisplayBytesSlice::from(dest_buffer.as_slice()));
                 }
 
                 // realign to next 16 bits
@@ -789,12 +786,13 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             other => return Err(Error::UnknownBlockType(other)),
         }
 
-        debug!("orig_dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
+        //debug!("orig_dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
 
         // jump translation?
         if let Some(jump_translation) = self.jump_translation {
             let new_buf_size = usize_to_u32(dest_buffer.len());
             let chunk_size = new_buf_size - original_buf_size;
+            debug!("E8 chunk_size {}", chunk_size);
             let chunk_offset = self.position_for_jump_translation.wrapping_sub(chunk_size);
             if chunk_offset < 0x4000_0000 && chunk_size > 10 {
                 let relative_offset = u32_to_usize(original_buf_size);
@@ -844,7 +842,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
             }
         }
 
-        debug!("dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
+        //debug!("dest_buf: {}", display_bytes::DisplayBytesSlice::from(dest_buffer.as_slice()));
 
         Ok(())
     }
