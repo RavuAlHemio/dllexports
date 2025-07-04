@@ -3,7 +3,7 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use expandms::cab::{CabData, CabFolder, CabHeader, CompressionType, FileInCab, FileInCabAttributes, FolderIndex};
-use expandms::inflate::Inflater;
+use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
 use expandms::lzx::LzxDecompressor;
 use expandms::ring_buffer::RingBuffer;
 use expandms::DecompressionError;
@@ -139,7 +139,7 @@ impl MultiFileContainer for Cabinet {
                     file.uncompressed_offset_in_folder.try_into().unwrap(),
                     file.uncompressed_size_bytes.try_into().unwrap(),
                 );
-                let mut lookback = RingBuffer::new(0x00);
+                let mut lookback = RingBuffer::new(0x00, MAX_LOOKBACK_DISTANCE);
                 for data_block in &self.folder_data[folder_index] {
                     // make a decompressor
 
@@ -154,7 +154,7 @@ impl MultiFileContainer for Cabinet {
                         return Err(crate::data_mgmt::Error::Decompression(DecompressionError::UnknownCompressionMethod));
                     }
 
-                    let mut inflater = Inflater::new(&mut cursor);
+                    let mut inflater = Inflater::new(&mut cursor, MAX_LOOKBACK_DISTANCE);
                     inflater.set_lookback(lookback);
                     let mut block_decompressor = FileDecompressor::MsZip {
                         inflater,

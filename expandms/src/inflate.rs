@@ -77,7 +77,7 @@ const DISTANCE_VALUES: [BaseCountAndExtraBits; 30] = [
     BaseCountAndExtraBits::new(16385, 13),
     BaseCountAndExtraBits::new(24577, 13),
 ];
-const MAX_LOOKBACK_DISTANCE: usize = 32768;
+pub const MAX_LOOKBACK_DISTANCE: usize = 32768;
 
 
 static PREDEFINED_VALUE_TREE: LazyLock<HuffmanTree<InflateValue>> = LazyLock::new(|| {

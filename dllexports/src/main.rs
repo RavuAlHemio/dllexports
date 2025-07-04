@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use display_bytes::DisplayBytesSlice;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
-use expandms::inflate::Inflater;
+use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
 use expandms::iso9660::VolumeDescriptor;
 use tracing::debug;
 
@@ -277,7 +277,7 @@ fn main() {
                 PokeMode::Inflate(args) => {
                     let mut input_file = File::open(&args.input_file)
                         .expect("failed to open input file");
-                    let mut inflater = Inflater::new(&mut input_file);
+                    let mut inflater = Inflater::new(&mut input_file, MAX_LOOKBACK_DISTANCE);
                     let mut output = Vec::new();
                     let mut output_file = File::create(&args.output_file)
                         .expect("failed to create output file");
