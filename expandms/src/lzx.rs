@@ -793,8 +793,8 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         if let Some(jump_translation) = self.jump_translation {
             let new_buf_size = usize_to_u32(dest_buffer.len());
             let chunk_size = new_buf_size - original_buf_size;
-            debug!("E8 chunk_size {}", chunk_size);
             let chunk_offset = self.position_for_jump_translation.wrapping_sub(chunk_size);
+            debug!("E8 chunk size {}, chunk offset {}", chunk_size, chunk_offset);
             if chunk_offset < 0x4000_0000 && chunk_size > 10 {
                 let relative_offset = u32_to_usize(original_buf_size);
                 let mut relative_i = 0;
@@ -802,9 +802,8 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
                     let i = relative_i + relative_offset;
                     if dest_buffer[i] == 0xE8 {
                         debug!("E8 jump translation");
-                        let current_pointer_u32 = chunk_offset + usize_to_u32(i);
                         // bit-cast to signed
-                        let current_pointer = current_pointer_u32 as i32;
+                        let current_pointer = usize_to_u32(i) as i32;
                         debug!("e8 curptr: {0:11} {0:#010X}", current_pointer);
                         let value_u32 =
                             (u32::from(dest_buffer[i+1]) <<  0) |
