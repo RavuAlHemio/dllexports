@@ -264,22 +264,22 @@ impl HuffmanCanonicalizable for DefinitionValue {
 
 pub struct Inflater<'r, R: Read> {
     reader: BitReader<&'r mut R, false>,
-    lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
+    lookback: RingBuffer<u8>,
 }
 impl<'r, R: Read> Inflater<'r, R> {
-    pub fn new(reader: &'r mut R) -> Self {
+    pub fn new(reader: &'r mut R, size: usize) -> Self {
         let reader = BitReader::new(reader);
         Self {
             reader,
-            lookback: RingBuffer::new(0x00),
+            lookback: RingBuffer::new(0x00, size),
         }
     }
 
-    pub fn lookback(&self) -> &RingBuffer<u8, MAX_LOOKBACK_DISTANCE> {
+    pub fn lookback(&self) -> &RingBuffer<u8> {
         &self.lookback
     }
 
-    pub fn set_lookback(&mut self, lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>) {
+    pub fn set_lookback(&mut self, lookback: RingBuffer<u8>) {
         self.lookback = lookback;
     }
 
@@ -459,7 +459,7 @@ impl<'r, R: Read> Inflater<'r, R> {
 
 #[cfg(test)]
 mod tests {
-    use super::Inflater;
+    use super::{Inflater, MAX_LOOKBACK_DISTANCE};
     use std::io::Cursor;
     use tracing_test::traced_test;
 
@@ -472,7 +472,7 @@ mod tests {
         let plaintext = b"able cable fable gable sable table arable doable enable liable stable unable usable viable";
 
         let mut deflated_reader = Cursor::new(deflated);
-        let mut inflater = Inflater::new(&mut deflated_reader);
+        let mut inflater = Inflater::new(&mut deflated_reader, MAX_LOOKBACK_DISTANCE);
 
         let mut output = Vec::new();
         loop {

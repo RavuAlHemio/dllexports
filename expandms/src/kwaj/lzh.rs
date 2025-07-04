@@ -142,7 +142,7 @@ pub(crate) fn decompress<R: Read, W: Write>(compressed_reader: &mut R, decompres
     let literals = create_huffman_tree(&mut bit_reader, 256, literals_encoding_type)?;
 
     const RING_BUFFER_SIZE: usize = 4096;
-    let mut ring_buffer: RingBuffer<u8, RING_BUFFER_SIZE> = RingBuffer::new(0x20);
+    let mut ring_buffer: RingBuffer<u8> = RingBuffer::new(0x20, RING_BUFFER_SIZE);
     ring_buffer.set_position(RING_BUFFER_SIZE - 17);
     let mut current_lookup = &match_run_lengths;
     loop {

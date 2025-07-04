@@ -11,7 +11,7 @@ pub(crate) fn decompress<R: Read, W: Write>(
     decompressed_writer: &mut W,
     szdd: bool,
 ) -> Result<(), DecompressionError> {
-    let mut ring_buffer: RingBuffer<u8, RING_BUFFER_SIZE> = RingBuffer::new(0x20);
+    let mut ring_buffer: RingBuffer<u8> = RingBuffer::new(0x20, RING_BUFFER_SIZE);
     ring_buffer.set_position(RING_BUFFER_SIZE - if szdd { 16 } else { 18 });
 
     loop {

@@ -9,7 +9,7 @@
 use std::fmt;
 use std::io::{self, Read};
 
-use display_bytes::{DisplayBytesSlice, HexBytesSlice};
+use display_bytes::HexBytesSlice;
 use tracing::{debug, error};
 
 use crate::huff::{HuffmanCanonicalizable, HuffmanTree};
@@ -26,8 +26,6 @@ pub const MIN_WINDOW_SIZE_EXPONENT: usize = 15;
 ///
 /// The exponent must be less than or equal to this value.
 pub const MAX_WINDOW_SIZE_EXPONENT: usize = 21;
-
-const MAX_LOOKBACK_DISTANCE: usize = 2*1024*1024;
 
 const LENGTH_TREE_ENTRIES: usize = 249;
 const ALIGNED_OFFSET_TREE_ENTRIES: usize = 8;
@@ -405,7 +403,7 @@ enum PreviousLengthType<'a> {
 pub struct LzxDecompressor<'r, R: Read> {
     reader: BitReader16Le<&'r mut R, true>,
     window_size_exponent: usize,
-    lookback: RingBuffer<u8, MAX_LOOKBACK_DISTANCE>,
+    lookback: RingBuffer<u8>,
     recent_lookback: RecentLookback,
     jump_translation: Option<i32>,
     position_for_jump_translation: u32,
@@ -421,6 +419,9 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         if window_size_exponent < MIN_WINDOW_SIZE_EXPONENT || window_size_exponent > MAX_WINDOW_SIZE_EXPONENT {
             return Err(Error::InvalidWindowSizeExponent(window_size_exponent));
         }
+
+        // 2**window_size_exponent
+        let window_size = 1 << window_size_exponent;
 
         let has_jump_translation = reader.read_bit_strict()?;
         let jump_translation = if has_jump_translation {
@@ -446,7 +447,7 @@ impl<'r, R: Read> LzxDecompressor<'r, R> {
         Ok(Self {
             reader,
             window_size_exponent,
-            lookback: RingBuffer::new(0x00),
+            lookback: RingBuffer::new(0x00, window_size),
             recent_lookback: RecentLookback::new(),
             jump_translation,
             position_for_jump_translation: 0,
