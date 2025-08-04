@@ -141,6 +141,7 @@ dependencies = [
  "clap",
  "display-bytes",
  "expandms",
+ "lzxd",
  "tracing",
  "tracing-subscriber",
 ]
@@ -152,6 +153,7 @@ dependencies = [
  "bitflags",
  "display-bytes",
  "from-to-repr",
+ "lzxd",
  "tracing",
  "tracing-test",
 ]
@@ -190,6 +192,12 @@ name = "log"
 version = "0.4.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+
+[[package]]
+name = "lzxd"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b29dffab797218e12e4df08ef5d15ab9efca2504038b1b32b9b32fc844b39c9"
 
 [[package]]
 name = "matchers"

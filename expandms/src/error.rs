@@ -11,7 +11,7 @@ pub enum DecompressionError {
     RelativeValueUnderflow,
     DataOffsetWithinHeader,
     Inflate(crate::inflate::Error),
-    Lzx(crate::lzx::Error),
+    Lzx(lzxd::DecompressError),
 }
 impl fmt::Display for DecompressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,7 +33,7 @@ impl fmt::Display for DecompressionError {
             Self::Inflate(e)
                 => write!(f, "Inflate error: {}", e),
             Self::Lzx(e)
-                => write!(f, "LZX error: {}", e),
+                => write!(f, "LZX decompression error: {}", e),
         }
     }
 }
@@ -61,6 +61,6 @@ impl From<crate::huff::HuffmanConstructionError> for DecompressionError {
 impl From<crate::inflate::Error> for DecompressionError {
     fn from(value: crate::inflate::Error) -> Self { Self::Inflate(value) }
 }
-impl From<crate::lzx::Error> for DecompressionError {
-    fn from(value: crate::lzx::Error) -> Self { Self::Lzx(value) }
+impl From<lzxd::DecompressError> for DecompressionError {
+    fn from(value: lzxd::DecompressError) -> Self { Self::Lzx(value) }
 }

@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use expandms::DecompressionError;
 use expandms::cab::{CabData, CabFolder, CabHeader, CompressionType, FileInCab, FileInCabAttributes, FolderIndex};
 use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
-use expandms::lzx::LzxDecompressor;
 use expandms::ring_buffer::RingBuffer;
-use expandms::DecompressionError;
+use lzxd::Lzxd;
 use tracing::debug;
 
 use crate::data_mgmt::MultiFileContainer;
+use crate::read_ext::ReadExt;
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -183,26 +184,33 @@ impl MultiFileContainer for Cabinet {
                 );
 
                 // make the magic reader that reads all blocks
-                let mut all_blocks_reader = CabFolderReader::new(
+                let all_blocks_reader = CabFolderReader::new(
                     Cursor::new(self.bytes.as_slice()),
                     self.folder_data[folder_index].clone(),
                 );
 
                 // make a decompressor
                 let window_size_exponent = (self.folders[folder_index].compression_parameters >> 4) & 0xFF;
-                let decompressor = LzxDecompressor::new(
-                    &mut all_blocks_reader,
-                    window_size_exponent.into(),
-                )?;
-
-                let total_uncompressed_length = self.folder_data[folder_index]
-                    .iter()
-                    .map(|fd| usize::from(fd.uncompressed_byte_count))
-                    .sum();
+                let window_size = match window_size_exponent {
+                    15 => lzxd::WindowSize::KB32,
+                    16 => lzxd::WindowSize::KB32,
+                    17 => lzxd::WindowSize::KB128,
+                    18 => lzxd::WindowSize::KB256,
+                    19 => lzxd::WindowSize::KB512,
+                    20 => lzxd::WindowSize::MB1,
+                    21 => lzxd::WindowSize::MB2,
+                    22 => lzxd::WindowSize::MB4,
+                    23 => lzxd::WindowSize::MB8,
+                    24 => lzxd::WindowSize::MB16,
+                    25 => lzxd::WindowSize::MB32,
+                    _ => panic!("unsupported window size exponent {}", window_size_exponent),
+                };
+                let decompressor = Lzxd::new(window_size);
 
                 let mut block_decompressor = FileDecompressor::Lzx {
                     decompressor,
-                    uncompressed_length: total_uncompressed_length,
+                    reader: Cursor::new(self.bytes.as_slice()),
+                    folder_data: self.folder_data[folder_index].clone(),
                 };
                 loop {
                     match collector.read(&mut block_decompressor)? {
@@ -281,8 +289,9 @@ enum FileDecompressor<'r> {
         last_block_read: bool,
     },
     Lzx {
-        decompressor: LzxDecompressor<'r, CabFolderReader<Cursor<&'r [u8]>>>,
-        uncompressed_length: usize,
+        decompressor: Lzxd,
+        reader: Cursor<&'r [u8]>,
+        folder_data: Vec<CabData>,
     },
 }
 impl<'r> FileDecompressor<'r> {
@@ -303,11 +312,16 @@ impl<'r> FileDecompressor<'r> {
                 }
                 Ok(buf)
             },
-            Self::Lzx { decompressor, uncompressed_length } => {
+            Self::Lzx { decompressor, reader, folder_data } => {
                 let mut buf = Vec::new();
-                while buf.len() < *uncompressed_length {
-                    debug!("decompressing next LZX block ({}/{})", buf.len(), uncompressed_length);
-                    decompressor.decompress_block(&mut buf)?;
+                for data_entry in folder_data {
+                    reader.seek(SeekFrom::Start(u64::try_from(data_entry.data_offset).unwrap()))?;
+                    let read_count = usize::try_from(data_entry.compressed_byte_count).unwrap();
+                    let mut chunk = vec![0u8; read_count];
+                    reader.read_exact(&mut chunk)?;
+
+                    let decoded = decompressor.decompress_next(&chunk, usize::try_from(data_entry.uncompressed_byte_count).unwrap())?;
+                    buf.extend_from_slice(decoded);
                 }
                 Ok(buf)
             },

@@ -1,5 +1,6 @@
 mod data_mgmt;
 mod formats;
+mod read_ext;
 
 
 use std::fs::{read_dir, File};

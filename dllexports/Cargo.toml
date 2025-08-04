@@ -8,5 +8,6 @@ binms = { path = "../binms" }
 clap = { version = "4.5", features = ["derive"] }
 display-bytes = { path = "../display-bytes" }
 expandms = { path = "../expandms" }
+lzxd = { version = "0.2" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
