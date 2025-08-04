@@ -118,7 +118,10 @@ fn set_up_tracing() {
     use tracing_subscriber::util::SubscriberInitExt;
 
     tracing_subscriber::registry()
-        .with(fmt::layer())
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+        )
         .with(EnvFilter::from_default_env())
         .init();
 }
