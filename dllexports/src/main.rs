@@ -12,7 +12,7 @@ use display_bytes::DisplayBytesSlice;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
 use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
 use expandms::iso9660::VolumeDescriptor;
-use tracing::debug;
+use tracing::{debug, error, info};
 
 use crate::data_mgmt::{IdentifiedFile, PathSequence};
 use crate::formats::interpret_file;
@@ -314,7 +314,7 @@ fn main() {
                 let entries = match read_dir(&path) {
                     Ok(e) => e,
                     Err(e) => {
-                        eprintln!("failed to read directory {}: {}", path.display(), e);
+                        error!("failed to read directory {}: {}", path.display(), e);
                         continue;
                     },
                 };
@@ -323,7 +323,7 @@ fn main() {
                     let entry = match entry_res {
                         Ok(e) => e,
                         Err(e) => {
-                            eprintln!("failed to read directory entry from {}: {}", path.display(), e);
+                            error!("failed to read directory entry from {}: {}", path.display(), e);
                             continue;
                         },
                     };
@@ -331,7 +331,7 @@ fn main() {
                     let entry_type = match entry.file_type() {
                         Ok(e) => e,
                         Err(e) => {
-                            eprintln!("failed to read type of {}: {}", entry.path().display(), e);
+                            error!("failed to read type of {}: {}", entry.path().display(), e);
                             continue;
                         },
                     };
@@ -349,7 +349,7 @@ fn main() {
                 let file_data = match std::fs::read(&file_path) {
                     Ok(fd) => fd,
                     Err(e) => {
-                        eprintln!("failed to read {}: {}", file_path.display(), e);
+                        error!("failed to read {}: {}", file_path.display(), e);
                         continue;
                     },
                 };
@@ -362,14 +362,14 @@ fn main() {
 
 
 fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
-    println!("interpreting {:?}", parent_path_sequence);
+    info!("interpreting {:?}", parent_path_sequence);
     match interpret_file(data) {
         Ok(IdentifiedFile::MultiFileContainer(mfc)) => {
             // scan each child file
             let files = match mfc.list_files() {
                 Ok(fs) => fs,
                 Err(e) => {
-                    eprintln!("failed to list files of {:?}: {}", parent_path_sequence, e);
+                    error!("failed to list files of {:?}: {}", parent_path_sequence, e);
                     return;
                 },
             };
@@ -387,7 +387,7 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
                         fd
                     },
                     Err(e) => {
-                        eprintln!("failed to obtain {:?}: {}", child_path_sequence, e);
+                        error!("failed to obtain {:?}: {}", child_path_sequence, e);
                         continue;
                     },
                 };
@@ -401,7 +401,7 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
             let file_data = match sfc.read_file() {
                 Ok(fd) => fd,
                 Err(e) => {
-                    eprintln!("failed to obtain {:?}: {}", child_path_sequence, e);
+                    error!("failed to obtain {:?}: {}", child_path_sequence, e);
                     return;
                 },
             };
@@ -411,7 +411,7 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
             let symbols = match symex.read_symbols() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("failed to read symbols from {:?}: {}", parent_path_sequence, e);
+                    error!("failed to read symbols from {:?}: {}", parent_path_sequence, e);
                     return;
                 },
             };
@@ -424,7 +424,7 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
             return;
         },
         Err(e) => {
-            eprintln!("failed to interpret file at {:?}: {}", parent_path_sequence, e);
+            error!("failed to interpret file at {:?}: {}", parent_path_sequence, e);
         },
     }
 }
