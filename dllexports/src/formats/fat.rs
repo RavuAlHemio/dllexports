@@ -24,6 +24,10 @@ impl FatFileSystem {
 
         // read header
         let header = FatHeader::read(&mut cursor)?;
+        if header.fat_bytes() > data.len() {
+            // yeah, that's an invalid header
+            return Err(Error::Io(ErrorKind::InvalidData.into()));
+        }
 
         // skip over reserved sectors
         let reserved_bytes = u64::from(header.reserved_sector_count) * u64::from(header.bytes_per_sector);
