@@ -274,7 +274,8 @@ pub fn read_cluster_chain_into<R: Read + Seek>(reader: &mut R, header: &FatHeade
 
     loop {
         // read the cluster entry from the allocation table
-        let current_cluster_entry = fat.entries[usize::try_from(current_cluster_index).unwrap()];
+        let current_cluster_entry = fat.entries.get(usize::try_from(current_cluster_index).unwrap())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
         match current_cluster_entry {
             FatEntry::Empty => return Ok(()),
             FatEntry::Bad => return Err(io::ErrorKind::InvalidData.into()),
@@ -304,7 +305,7 @@ pub fn read_cluster_chain_into<R: Read + Seek>(reader: &mut R, header: &FatHeade
             FatEntry::Chain(next_cluster_index) => {
                 // pointer to the next cluster
                 prev_cluster_index = Some(current_cluster_index);
-                current_cluster_index = next_cluster_index;
+                current_cluster_index = *next_cluster_index;
             },
             _ => unreachable!(),
         }
