@@ -1,7 +1,9 @@
 [workspace]
 members = [
-    "binms", "display-bytes",
+    "binms",
+    "display-bytes",
     "dllexports",
     "expandms",
+    "filtexp",
 ]
 resolver = "2"

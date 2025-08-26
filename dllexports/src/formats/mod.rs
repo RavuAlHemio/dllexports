@@ -163,6 +163,8 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
         }
     }
 
+    // ignore compressed files/containers
+    /*
     let is_kwaj_or_sz =
         data.starts_with(b"KWAJ\x88\xF0\x27\xD1")
         || data.starts_with(b"SZDD\x88\xF0\x27\x33")
@@ -209,6 +211,7 @@ pub(crate) fn interpret_file(data: &[u8]) -> Result<IdentifiedFile, Error> {
     // * CAB (multi-file container)
     // * WIM (m.f.c.)
     // * possibly NTFS (m.f.c.)
+    */
 
     Ok(IdentifiedFile::Unidentified)
 }

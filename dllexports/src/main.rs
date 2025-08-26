@@ -14,7 +14,7 @@ use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
 use expandms::iso9660::VolumeDescriptor;
 use tracing::{debug, error, info};
 
-use crate::data_mgmt::{IdentifiedFile, PathSequence};
+use crate::data_mgmt::{IdentifiedFile, PathSequence, Symbol};
 use crate::formats::interpret_file;
 
 
@@ -124,6 +124,25 @@ fn set_up_tracing() {
         )
         .with(EnvFilter::from_default_env())
         .init();
+}
+
+
+fn escape_name(name: &str) -> String {
+    let mut ret = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c == '\r' {
+            ret.push_str("\\r");
+        } else if c == '\n' {
+            ret.push_str("\\n");
+        } else if c == '\t' {
+            ret.push_str("\\t");
+        } else if c == '\\' {
+            ret.push_str("\\\\");
+        } else {
+            ret.push(c);
+        }
+    }
+    ret
 }
 
 
@@ -418,8 +437,16 @@ fn scan_file(parent_path_sequence: &PathSequence, data: &[u8]) {
                     return;
                 },
             };
+            let path_sequence: &[PathBuf] = parent_path_sequence.as_ref();
             for symbol in symbols {
-                println!("{:?}: {:?}", parent_path_sequence, symbol);
+                match symbol {
+                    Symbol::ByName { name }
+                        => println!("{:?}\t\t{}", &*path_sequence, escape_name(&name)),
+                    Symbol::ByOrdinal { ordinal }
+                        => println!("{:?}\t{}\t", &*path_sequence, ordinal),
+                    Symbol::ByNameAndOrdinal { name, ordinal }
+                        => println!("{:?}\t{}\t{}", &*path_sequence, ordinal, escape_name(&name)),
+                }
             }
         },
         Ok(IdentifiedFile::Unidentified) => {
