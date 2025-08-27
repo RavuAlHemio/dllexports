@@ -1,3 +1,4 @@
+pub mod ico1;
 pub mod mz;
 pub mod ne;
 pub mod pe;

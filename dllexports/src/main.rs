@@ -67,6 +67,9 @@ enum PokeExeMode {
 
     /// Outputs the header of an NE (16-bit Windows executable) file.
     NeHeader(InputFileOnlyArgs),
+
+    /// Outputs icons in an NE (16-bit Windows executable) file.
+    NeIcons(InputFileAndGraphicsArgs),
 }
 
 #[derive(Parser)]
@@ -96,6 +99,15 @@ struct InputFileAndIndexArgs {
 struct InputFileAndOptIndexArgs {
     pub input_file: PathBuf,
     pub index: Option<u32>,
+}
+
+#[derive(Parser)]
+struct InputFileAndGraphicsArgs {
+    /// Output ASCII characters. (Outputs sixels by default.)
+    #[arg(short, long)]
+    pub ascii: bool,
+
+    pub input_file: PathBuf,
 }
 
 #[derive(Parser)]
@@ -281,6 +293,81 @@ fn main() {
                             let ne = binms::ne::Executable::read(&mut input_file)
                                 .expect("failed to read NE header");
                             println!("{:#?}", ne);
+                        },
+                        PokeExeMode::NeIcons(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let ne = binms::ne::Executable::read(&mut input_file)
+                                .expect("failed to read NE header");
+
+                            for (type_id, res_type) in &ne.resource_table.id_to_type {
+                                if let binms::ne::ResourceId::Numbered(type_num) = type_id {
+                                    if *type_num == 0x8001 || *type_num == 0x8003 {
+                                        // cursor or icon
+                                        for (res_id, res) in &res_type.resources {
+                                            println!("Resource {:#06X}/{:?}:", type_num, res_id);
+
+                                            // try parsing as Ico1
+                                            let data_bytes: &[u8] = res.data.as_ref();
+                                            let (_rest, icon) = match binms::ico1::Icon1::take_from_bytes(data_bytes) {
+                                                Ok(i) => i,
+                                                Err(e) => {
+                                                    println!("parsing error: {}", e);
+                                                    continue;
+                                                },
+                                            };
+
+                                            let variants = [
+                                                ("device-dependent", icon.device_dependent.as_ref()),
+                                                ("device-independent", icon.device_independent.as_ref()),
+                                            ];
+                                            for (variant_name, variant_icon_opt) in variants {
+                                                let Some(variant_icon) = variant_icon_opt
+                                                    else { continue };
+
+                                                if args.ascii {
+                                                    // ASCII-only output
+                                                    let width = usize::try_from(variant_icon.width_bytes).unwrap();
+                                                    for byte_slice in [&variant_icon.and_bytes, &variant_icon.xor_bytes] {
+                                                        print!("+");
+                                                        for _ in 0..8*width {
+                                                            print!("-");
+                                                        }
+                                                        println!("+");
+
+                                                        for chunk in byte_slice.chunks(width) {
+                                                            print!("|");
+                                                            for byte in chunk {
+                                                                for bit in (0..8).rev() {
+                                                                    if byte & (1 << bit) != 0 {
+                                                                        print!("@");
+                                                                    } else {
+                                                                        print!(" ");
+                                                                    }
+                                                                }
+                                                            }
+                                                            println!("|");
+                                                        }
+
+                                                        print!("+");
+                                                        for _ in 0..8*width {
+                                                            print!("-");
+                                                        }
+                                                        println!("+");
+                                                    }
+                                                } else {
+                                                    // spit out the sixel streams
+                                                    println!("{} AND bytes:", variant_name);
+                                                    println!("{}", variant_icon.and_bytes_as_sixels());
+                                                    println!("{} XOR bytes:", variant_name);
+                                                    println!("{}", variant_icon.xor_bytes_as_sixels());
+                                                    println!();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         },
                     }
                 },
