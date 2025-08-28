@@ -68,6 +68,9 @@ enum PokeExeMode {
     /// Outputs the header of an NE (16-bit Windows executable) file.
     NeHeader(InputFileOnlyArgs),
 
+    /// Lists icon groups in an NE (16-bit Windows executable) file.
+    NeIconGroups(InputFileOnlyArgs),
+
     /// Outputs icons in an NE (16-bit Windows executable) file.
     NeIcons(InputFileAndGraphicsArgs),
 }
@@ -306,6 +309,34 @@ fn main() {
                             let ne = binms::ne::Executable::read(&mut input_file)
                                 .expect("failed to read NE header");
                             println!("{:#?}", ne);
+                        },
+                        PokeExeMode::NeIconGroups(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let ne = binms::ne::Executable::read(&mut input_file)
+                                .expect("failed to read NE header");
+
+                            for (type_id, res_type) in &ne.resource_table.id_to_type {
+                                const CURSOR_LIST: u16 = 0x8000 | 12;
+                                const ICON_LIST: u16 = 0x8000 | 14;
+                                match type_id {
+                                    binms::ne::ResourceId::Numbered(CURSOR_LIST) => {
+                                    },
+                                    binms::ne::ResourceId::Numbered(ICON_LIST) => {
+                                    },
+                                    _ => continue,
+                                }
+
+                                for (res_id, res) in &res_type.resources {
+                                    let data: &[u8] = res.data.as_ref();
+                                    let Ok((_rest, icon_group)) = binms::icon_group::IconGroup::take_from_bytes(data)
+                                        else { println!("butts"); continue; };
+                                    println!("icon group {:?}:", res_id);
+                                    for icon in icon_group.icons {
+                                        println!("  {:?} ({})", icon, icon.id + 0x8000);
+                                    }
+                                }
+                            }
                         },
                         PokeExeMode::NeIcons(args) => {
                             let mut input_file = File::open(&args.input_file)

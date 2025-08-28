@@ -1,5 +1,6 @@
 pub mod bitmap;
 pub mod ico1;
+pub mod icon_group;
 pub mod mz;
 pub mod ne;
 pub mod pe;
