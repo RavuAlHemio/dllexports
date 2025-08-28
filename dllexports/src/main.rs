@@ -7,7 +7,7 @@ use std::fs::{read_dir, File};
 use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use display_bytes::DisplayBytesSlice;
 use expandms::fat::{AllocationTable, FatHeader, RootDirectoryLocation};
 use expandms::inflate::{Inflater, MAX_LOOKBACK_DISTANCE};
@@ -101,13 +101,26 @@ struct InputFileAndOptIndexArgs {
     pub index: Option<u32>,
 }
 
+#[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd, ValueEnum)]
+enum GraphicsOutputFormat {
+    #[default] Sixel,
+    Ascii,
+    Png,
+}
+
 #[derive(Parser)]
 struct InputFileAndGraphicsArgs {
-    /// Output ASCII characters. (Outputs sixels by default.)
     #[arg(short, long)]
-    pub ascii: bool,
+    pub format: GraphicsOutputFormat,
+
+    #[arg(short = 't', long)]
+    pub res_type: Option<u16>,
+
+    #[arg(short = 'i', long)]
+    pub res_id: Option<u16>,
 
     pub input_file: PathBuf,
+    pub output_file: PathBuf,
 }
 
 #[derive(Parser)]
@@ -303,66 +316,182 @@ fn main() {
                             for (type_id, res_type) in &ne.resource_table.id_to_type {
                                 if let binms::ne::ResourceId::Numbered(type_num) = type_id {
                                     if *type_num == 0x8001 || *type_num == 0x8003 {
+                                        if let Some(rt) = args.res_type {
+                                            if *type_num != rt {
+                                                continue;
+                                            }
+                                        }
+
                                         // cursor or icon
                                         for (res_id, res) in &res_type.resources {
+                                            if let binms::ne::ResourceId::Numbered(res_num) = res_id {
+                                                if let Some(ri) = args.res_id {
+                                                    if *res_num != ri {
+                                                        continue;
+                                                    }
+                                                }
+                                            }
+
                                             println!("Resource {:#06X}/{:?}:", type_num, res_id);
+                                            let data_bytes: &[u8] = res.data.as_ref();
 
                                             // try parsing as Ico1
-                                            let data_bytes: &[u8] = res.data.as_ref();
-                                            let (_rest, icon) = match binms::ico1::Icon1::take_from_bytes(data_bytes) {
-                                                Ok(i) => i,
-                                                Err(e) => {
-                                                    println!("parsing error: {}", e);
-                                                    continue;
-                                                },
-                                            };
+                                            if let Ok((_rest, icon)) = binms::ico1::Icon1::take_from_bytes(data_bytes) {
+                                                let variants = [
+                                                    ("device-dependent", icon.device_dependent.as_ref()),
+                                                    ("device-independent", icon.device_independent.as_ref()),
+                                                ];
+                                                for (variant_name, variant_icon_opt) in variants {
+                                                    let Some(variant_icon) = variant_icon_opt
+                                                        else { continue };
 
-                                            let variants = [
-                                                ("device-dependent", icon.device_dependent.as_ref()),
-                                                ("device-independent", icon.device_independent.as_ref()),
-                                            ];
-                                            for (variant_name, variant_icon_opt) in variants {
-                                                let Some(variant_icon) = variant_icon_opt
-                                                    else { continue };
+                                                    match args.format {
+                                                        GraphicsOutputFormat::Sixel => {
+                                                            let mut f = File::create(&args.output_file)
+                                                                .expect("failed to open output file");
 
-                                                if args.ascii {
-                                                    // ASCII-only output
-                                                    let width = usize::try_from(variant_icon.width_bytes).unwrap();
-                                                    for byte_slice in [&variant_icon.and_bytes, &variant_icon.xor_bytes] {
-                                                        print!("+");
-                                                        for _ in 0..8*width {
-                                                            print!("-");
-                                                        }
-                                                        println!("+");
+                                                            // spit out the sixel streams
+                                                            writeln!(f, "{} AND bytes:", variant_name).unwrap();
+                                                            writeln!(f, "{}", variant_icon.and_bytes_as_sixels()).unwrap();
+                                                            writeln!(f, "{} XOR bytes:", variant_name).unwrap();
+                                                            writeln!(f, "{}", variant_icon.xor_bytes_as_sixels()).unwrap();
+                                                            writeln!(f).unwrap();
 
-                                                        for chunk in byte_slice.chunks(width) {
-                                                            print!("|");
-                                                            for byte in chunk {
-                                                                for bit in (0..8).rev() {
-                                                                    if byte & (1 << bit) != 0 {
-                                                                        print!("@");
-                                                                    } else {
-                                                                        print!(" ");
+                                                            f.flush()
+                                                                .expect("failed to flush output file");
+                                                        },
+                                                        GraphicsOutputFormat::Ascii => {
+                                                            let mut f = File::create(&args.output_file)
+                                                                .expect("failed to open output file");
+
+                                                            // ASCII-only output
+                                                            let width = usize::try_from(variant_icon.width_bytes).unwrap();
+                                                            for byte_slice in [&variant_icon.and_bytes, &variant_icon.xor_bytes] {
+                                                                write!(f, "+").unwrap();
+                                                                for _ in 0..8*width {
+                                                                    write!(f, "-").unwrap();
+                                                                }
+                                                                writeln!(f, "+").unwrap();
+
+                                                                for chunk in byte_slice.chunks(width) {
+                                                                    write!(f, "|").unwrap();
+                                                                    for byte in chunk {
+                                                                        for bit in (0..8).rev() {
+                                                                            if byte & (1 << bit) != 0 {
+                                                                                write!(f, "@").unwrap();
+                                                                            } else {
+                                                                                write!(f, " ").unwrap();
+                                                                            }
+                                                                        }
                                                                     }
+                                                                    writeln!(f, "|").unwrap();
+                                                                }
+
+                                                                write!(f, "+").unwrap();
+                                                                for _ in 0..8*width {
+                                                                    write!(f, "-").unwrap();
+                                                                }
+                                                                writeln!(f, "+").unwrap();
+                                                            }
+
+                                                            f.flush()
+                                                                .expect("failed to flush output file");
+                                                        },
+                                                        GraphicsOutputFormat::Png => {
+                                                            let mut f = File::create(&args.output_file)
+                                                                .expect("failed to open output file");
+
+                                                            let width = usize::try_from(variant_icon.width_bytes).unwrap();
+
+                                                            let mut encoder = png::Encoder::new(
+                                                                f,
+                                                                variant_icon.width_pixels.into(),
+                                                                variant_icon.height_pixels.into(),
+                                                            );
+                                                            encoder.set_color(png::ColorType::Indexed);
+                                                            encoder.set_depth(png::BitDepth::Two);
+
+                                                            // palette: 0b00=transparent, 0b01=black, 0b10=white, [0b11=unused]
+                                                            encoder.set_palette(&[
+                                                                0, 0, 0,
+                                                                0, 0, 0,
+                                                                255, 255, 255,
+                                                            ]);
+                                                            // 0b00=transparent, rest opaque
+                                                            encoder.set_trns(&[0]);
+
+                                                            let mut writer = encoder.write_header()
+                                                                .expect("failed to write PNG header");
+
+                                                            // ensure we do not encode any unused trailing bytes
+                                                            let minimum_bytes = (usize::try_from(variant_icon.width_pixels).unwrap() + (8-1)) / 8;
+
+                                                            // now then
+                                                            let mut png_data = Vec::new();
+                                                            let row_iterator = variant_icon.and_bytes
+                                                                .chunks(width)
+                                                                .zip(variant_icon.xor_bytes.chunks(width));
+                                                            for (and_row, xor_row) in row_iterator {
+                                                                let byte_iterator = and_row
+                                                                    .iter()
+                                                                    .take(minimum_bytes)
+                                                                    .copied()
+                                                                    .zip(
+                                                                        xor_row
+                                                                            .iter()
+                                                                            .take(minimum_bytes)
+                                                                            .copied()
+                                                                    );
+                                                                for (and_byte, xor_byte) in byte_iterator {
+                                                                    let mut word = 0u16;
+                                                                    for bit in (0..8).rev() {
+                                                                        // if the xor bit is set, make it white
+                                                                        // if the and bit is set, make it transparent
+                                                                        // otherwise, make it black
+                                                                        if xor_byte & (1 << bit) != 0 {
+                                                                            word |= 0b10 << (2 * bit);
+                                                                        } else if and_byte & (1 << bit) != 0 {
+                                                                            word |= 0b00 << (2 * bit);
+                                                                        } else {
+                                                                            word |= 0b01 << (2 * bit);
+                                                                        }
+                                                                    }
+                                                                    png_data.extend(word.to_be_bytes());
                                                                 }
                                                             }
-                                                            println!("|");
-                                                        }
-
-                                                        print!("+");
-                                                        for _ in 0..8*width {
-                                                            print!("-");
-                                                        }
-                                                        println!("+");
+                                                            writer.write_image_data(&png_data)
+                                                                .expect("failed to write PNG data");
+                                                        },
                                                     }
-                                                } else {
-                                                    // spit out the sixel streams
-                                                    println!("{} AND bytes:", variant_name);
-                                                    println!("{}", variant_icon.and_bytes_as_sixels());
-                                                    println!("{} XOR bytes:", variant_name);
-                                                    println!("{}", variant_icon.xor_bytes_as_sixels());
-                                                    println!();
                                                 }
+                                            } else if let Ok((_rest, icon)) = binms::bitmap::Bitmap::take_from_bytes(data_bytes, true) {
+                                                if args.format != GraphicsOutputFormat::Png {
+                                                    println!("can only output as PNG; skipping");
+                                                    continue;
+                                                }
+
+                                                println!("original bit depth: {}", icon.header.bit_count);
+
+                                                let mut f = File::create(&args.output_file)
+                                                    .expect("failed to open output file");
+
+                                                let mut encoder = png::Encoder::new(
+                                                    f,
+                                                    icon.actual_width(),
+                                                    icon.actual_height(),
+                                                );
+
+                                                // output as RGBA
+                                                // (run optipng on the result if you don't like that)
+                                                encoder.set_color(png::ColorType::Rgba);
+                                                encoder.set_depth(png::BitDepth::Eight);
+
+                                                let mut writer = encoder.write_header()
+                                                    .expect("failed to write PNG header");
+                                                writer.write_image_data(&icon.to_rgba8())
+                                                    .expect("failed to write PNG data");
+                                            } else {
+                                                println!("parses as neither ICO1 nor bitmap");
                                             }
                                         }
                                     }
