@@ -6,10 +6,11 @@
 use std::{collections::BTreeMap, io::{self, Read, Seek, SeekFrom}};
 
 use bitflags::bitflags;
+use display_bytes::DisplayBytesVec;
 use from_to_repr::from_to_other;
 use tracing::debug;
 
-use crate::read_nul_terminated_ascii_string;
+use crate::{read_nul_terminated_ascii_string, read_pascal_utf16le_string};
 
 
 const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
@@ -959,4 +960,209 @@ pub enum ExportAddressTableEntry {
     Skip,
     Code { code_rva: u32 },
     Forwarder { target: String },
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ResourceDirectoryTable {
+    pub characteristics: u32,
+    pub timestamp: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    // name_entry_count: u16,
+    // id_entry_count: u16,
+    pub id_to_entry: BTreeMap<ResourceIdentifier, ResourceChild>, // [(ResourceIdentifier, ResourceChild); name_entry_count + id_entry_count]
+}
+impl ResourceDirectoryTable {
+    pub fn read_from_pe<R: Read + Seek>(reader: &mut R, resources_start_virtual: u32, section_table: &SectionTable) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 16];
+        reader.read_exact(&mut header_buf)?;
+
+        let characteristics = u32::from_le_bytes(header_buf[0..4].try_into().unwrap());
+        let timestamp = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
+        let major_version = u16::from_le_bytes(header_buf[8..10].try_into().unwrap());
+        let minor_version = u16::from_le_bytes(header_buf[10..12].try_into().unwrap());
+        let name_entry_count = u16::from_le_bytes(header_buf[12..14].try_into().unwrap());
+        let id_entry_count = u16::from_le_bytes(header_buf[14..16].try_into().unwrap());
+
+        let total_entry_count = usize::from(name_entry_count) + usize::from(id_entry_count);
+        let mut entry_bytes = vec![0u8; total_entry_count * 8];
+
+        // read the bytes of the entries
+        reader.read_exact(&mut entry_bytes)?;
+
+        // collect the entries
+        let mut id_to_entry = BTreeMap::new();
+        let mut rest = entry_bytes.as_slice();
+
+        for _ in 0..name_entry_count {
+            let name_offset = u32::from_le_bytes(rest[0..4].try_into().unwrap());
+            let value_offset = u32::from_le_bytes(rest[4..8].try_into().unwrap());
+
+            // the name offset should have the top bit set
+            if name_offset & 0x8000_0000 == 0 {
+                debug!("named resource entry has a name offset {:#010X} without top bit set", name_offset);
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+            let name_position_virtual = resources_start_virtual + (name_offset & 0x7FFF_FFFF);
+            let Some(name_position_raw) = section_table.virtual_to_raw(name_position_virtual) else {
+                debug!("failed to find entry name raw position for virtual position {:#010X}", name_position_virtual);
+                return Err(io::ErrorKind::InvalidData.into());
+            };
+            reader.seek(SeekFrom::Start(name_position_raw.into()))?;
+            let name = read_pascal_utf16le_string(reader)?;
+
+            // decode the data
+            let data = ResourceChild::read_from_pe(
+                reader,
+                resources_start_virtual,
+                value_offset,
+                section_table,
+            )?;
+
+            let old_entry_opt = id_to_entry.insert(
+                ResourceIdentifier::Name(name.clone()),
+                data,
+            );
+            if old_entry_opt.is_some() {
+                debug!("duplicate resource key {:?}", ResourceIdentifier::Name(name));
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+
+            rest = &rest[8..];
+        }
+
+        for _ in 0..id_entry_count {
+            let id = u32::from_le_bytes(rest[0..4].try_into().unwrap());
+            let value_offset = u32::from_le_bytes(rest[4..8].try_into().unwrap());
+
+            // decode the data
+            let data = ResourceChild::read_from_pe(
+                reader,
+                resources_start_virtual,
+                value_offset,
+                section_table,
+            )?;
+
+            let old_entry_opt = id_to_entry.insert(
+                ResourceIdentifier::Integer(id),
+                data,
+            );
+            if old_entry_opt.is_some() {
+                debug!("duplicate resource key {:?}", ResourceIdentifier::Integer(id));
+                return Err(io::ErrorKind::InvalidData.into());
+            }
+
+            rest = &rest[8..];
+        }
+
+        Ok(Self {
+            characteristics,
+            timestamp,
+            major_version,
+            minor_version,
+            id_to_entry,
+        })
+    }
+
+    pub fn read_root_from_pe<R: Read + Seek>(reader: &mut R, resource_table_directory_entry: &DataDirectoryEntry, section_table: &SectionTable) -> Result<Self, io::Error> {
+        // ensure the sections don't overlap
+        if section_table.has_overlap() {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
+        let position = reader.seek(SeekFrom::Current(0))?;
+
+        // go to offset of resource table directory
+        let resource_table_directory_offset = section_table.virtual_to_raw(resource_table_directory_entry.address)
+            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+        reader.seek(SeekFrom::Start(resource_table_directory_offset.into()))?;
+
+        // recursively read the topmost table
+        let ret = Self::read_from_pe(reader, resource_table_directory_entry.address, section_table)?;
+
+        // return to original position
+        reader.seek(SeekFrom::Start(position))?;
+
+        // done
+        Ok(ret)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceIdentifier {
+    Name(String), // name_offset: u32 -> Pascal UTF-16LE string
+    Integer(u32),
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceChild {
+    Data(ResourceData),
+    Subdirectory(ResourceDirectoryTable),
+}
+impl ResourceChild {
+    pub fn read_from_pe<R: Read + Seek>(reader: &mut R, resources_start_virtual: u32, value_offset_virtual: u32, section_table: &SectionTable) -> Result<Self, io::Error> {
+        // check the top bit of the value offset to see if this is a data or subdirectory node
+        if value_offset_virtual & 0x8000_0000 == 0 {
+            // data
+            let data_loc_virtual = resources_start_virtual + value_offset_virtual;
+            let Some(data_loc_raw) = section_table.virtual_to_raw(data_loc_virtual) else {
+                debug!("failed to find entry value raw position for virtual position {:#010X}", data_loc_virtual);
+                return Err(io::ErrorKind::InvalidData.into());
+            };
+            reader.seek(SeekFrom::Start(data_loc_raw.into()))?;
+            let data = ResourceData::read_from_pe(reader, section_table)?;
+            Ok(Self::Data(data))
+        } else {
+            // subdirectory
+            let subdir_loc_virtual = resources_start_virtual + (value_offset_virtual & 0x7FFF_FFFF);
+            let Some(subdir_loc_raw) = section_table.virtual_to_raw(subdir_loc_virtual) else {
+                debug!("failed to find entry value raw position for virtual position {:#010X}", subdir_loc_virtual);
+                return Err(io::ErrorKind::InvalidData.into());
+            };
+            reader.seek(SeekFrom::Start(subdir_loc_raw.into()))?;
+            let subdir = ResourceDirectoryTable::read_from_pe(reader, resources_start_virtual, section_table)?;
+            Ok(Self::Subdirectory(subdir))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ResourceData {
+    pub data_rva: u32,
+    pub size: u32,
+    pub codepage: u32,
+    pub reserved: u32,
+    pub data: Option<DisplayBytesVec>, // size bytes at data_rva; None if loading fails
+}
+impl ResourceData {
+    pub fn read_from_pe<R: Read + Seek>(reader: &mut R, section_table: &SectionTable) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 16];
+        reader.read_exact(&mut header_buf)?;
+
+        let data_rva = u32::from_le_bytes(header_buf[0..4].try_into().unwrap());
+        let size = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
+        let codepage = u32::from_le_bytes(header_buf[8..12].try_into().unwrap());
+        let reserved = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
+
+        // try our luck
+        let mut data = None;
+        if let Some(data_raw) = section_table.virtual_to_raw(data_rva) {
+            if let Ok(_) = reader.seek(SeekFrom::Start(data_raw.into())) {
+                if let Ok(size_usize) = usize::try_from(size) {
+                    let mut buf = vec![0u8; size_usize];
+                    if let Ok(_) = reader.read_exact(&mut buf) {
+                        data = Some(DisplayBytesVec::from(buf));
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            data_rva,
+            size,
+            codepage,
+            reserved,
+            data,
+        })
+    }
 }

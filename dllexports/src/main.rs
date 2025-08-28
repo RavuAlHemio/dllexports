@@ -73,6 +73,12 @@ enum PokeExeMode {
 
     /// Outputs icons in an NE (16-bit Windows executable) file.
     NeIcons(InputFileAndGraphicsArgs),
+
+    /// Outputs the header of a PE (32-bit/64-bit Windows executable) file.
+    PeHeader(InputFileOnlyArgs),
+
+    /// Outputs the resources in a PE (32-bit/64-bit Windows executable) file.
+    PeResources(InputFileOnlyArgs),
 }
 
 #[derive(Parser)]
@@ -528,6 +534,30 @@ fn main() {
                                     }
                                 }
                             }
+                        },
+                        PokeExeMode::PeHeader(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let pe = binms::pe::Executable::read(&mut input_file)
+                                .expect("failed to read PE header");
+                            println!("{:#?}", pe);
+                        },
+                        PokeExeMode::PeResources(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let pe = binms::pe::Executable::read(&mut input_file)
+                                .expect("failed to read PE header");
+                            let optional_header = pe.optional_header.as_ref()
+                                .expect("PE file is missing optional header");
+                            let binms::pe::OptionalHeader::Coff(cough) = optional_header
+                                else { panic!("PE file's optional header is not COFF") };
+                            let optional_win_header = cough.optional_windows_header.as_ref()
+                                .expect("PE file's COFF optional header does not contain the optional Windows header");
+                            let res_entry = optional_win_header.known_data_directory_entry(binms::pe::KnownDataDirectoryEntry::ResourceTable)
+                                .expect("PE file does not have a resource directory entry");
+                            let resources = binms::pe::ResourceDirectoryTable::read_root_from_pe(&mut input_file, &res_entry, &pe.section_table)
+                                .expect("failed to read resources");
+                            println!("{:#?}", resources);
                         },
                     }
                 },
