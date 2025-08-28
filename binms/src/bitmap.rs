@@ -460,7 +460,7 @@ impl Bitmap {
                 },
                 32 => {
                     // take four bytes at a time and pick them apart
-                    for dword_bytes in in_row.chunks(3) {
+                    for dword_bytes in in_row.chunks(4) {
                         // 0BGR
                         let dword = u32::from_le_bytes(dword_bytes.try_into().unwrap());
                         let r: u8 = ((dword >>  0) & 0b1111_1111).try_into().unwrap();
