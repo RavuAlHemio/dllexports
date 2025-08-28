@@ -72,13 +72,19 @@ enum PokeExeMode {
     NeIconGroups(InputFileOnlyArgs),
 
     /// Outputs icons in an NE (16-bit Windows executable) file.
-    NeIcons(InputFileAndGraphicsArgs),
+    NeIcons(InputFileNeResourceGraphicsArgs),
 
     /// Outputs the header of a PE (32-bit/64-bit Windows executable) file.
     PeHeader(InputFileOnlyArgs),
 
     /// Outputs the resources in a PE (32-bit/64-bit Windows executable) file.
     PeResources(InputFileOnlyArgs),
+
+    /// Lists icon groups in a PE (32-bit/64-bit Windows executable) file.
+    PeIconGroups(InputFileOnlyArgs),
+
+    /// Outputs icons in a PE (32-bit/64-bit Windows executable) file.
+    PeIcons(InputFilePeResourceGraphicsArgs),
 }
 
 #[derive(Parser)]
@@ -118,7 +124,7 @@ enum GraphicsOutputFormat {
 }
 
 #[derive(Parser)]
-struct InputFileAndGraphicsArgs {
+struct InputFileNeResourceGraphicsArgs {
     #[arg(short, long)]
     pub format: GraphicsOutputFormat,
 
@@ -128,6 +134,15 @@ struct InputFileAndGraphicsArgs {
     #[arg(short = 'i', long)]
     pub res_id: Option<u16>,
 
+    pub input_file: PathBuf,
+    pub output_file: PathBuf,
+}
+
+#[derive(Parser)]
+struct InputFilePeResourceGraphicsArgs {
+    #[arg(short = 't', long = "type")] pub res_type: Option<u32>,
+    #[arg(short = 'i', long = "id")] pub res_id: Option<u32>,
+    #[arg(short = 'l', long = "lang")] pub res_lang: Option<u32>,
     pub input_file: PathBuf,
     pub output_file: PathBuf,
 }
@@ -558,6 +573,154 @@ fn main() {
                             let resources = binms::pe::ResourceDirectoryTable::read_root_from_pe(&mut input_file, &res_entry, &pe.section_table)
                                 .expect("failed to read resources");
                             println!("{:#?}", resources);
+                        },
+                        PokeExeMode::PeIconGroups(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let pe = binms::pe::Executable::read(&mut input_file)
+                                .expect("failed to read PE header");
+                            let optional_header = pe.optional_header.as_ref()
+                                .expect("PE file is missing optional header");
+                            let binms::pe::OptionalHeader::Coff(cough) = optional_header
+                                else { panic!("PE file's optional header is not COFF") };
+                            let optional_win_header = cough.optional_windows_header.as_ref()
+                                .expect("PE file's COFF optional header does not contain the optional Windows header");
+                            let res_entry = optional_win_header.known_data_directory_entry(binms::pe::KnownDataDirectoryEntry::ResourceTable)
+                                .expect("PE file does not have a resource directory entry");
+                            let resources = binms::pe::ResourceDirectoryTable::read_root_from_pe(&mut input_file, &res_entry, &pe.section_table)
+                                .expect("failed to read resources");
+
+                            // abide by the three-layer structure: type -> resource -> language
+                            let relevant_resource_types = [
+                                binms::pe::ResourceIdentifier::Integer(12), // cursor group
+                                binms::pe::ResourceIdentifier::Integer(14), // icon group
+                            ];
+                            for resource_type in relevant_resource_types {
+                                let Some(binms::pe::ResourceChild::Subdirectory(resources))
+                                    = resources.id_to_entry.get(&resource_type)
+                                    else { continue };
+                                for (resource_id, resource) in &resources.id_to_entry {
+                                    let binms::pe::ResourceChild::Subdirectory(langs)
+                                        = resource
+                                        else { continue };
+                                    for (lang_id, resource_data_child) in &langs.id_to_entry {
+                                        let binms::pe::ResourceChild::Data(data)
+                                            = resource_data_child
+                                            else { continue };
+                                        let Some(data_bytes): Option<&[u8]> = data.data
+                                            .as_ref().map(|d| d.as_ref())
+                                            else { continue };
+
+                                        // try interpreting this as a standard Windows icon group
+                                        let Ok((_rest, ig)) = binms::icon_group::IconGroup::take_from_bytes(data_bytes)
+                                            else { continue };
+
+                                        println!("{:?}/{:?}/{:?}:", resource_type, resource_id, lang_id);
+                                        for icon in &ig.icons {
+                                            println!("  {:?}", icon);
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        PokeExeMode::PeIcons(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let pe = binms::pe::Executable::read(&mut input_file)
+                                .expect("failed to read PE header");
+                            let optional_header = pe.optional_header.as_ref()
+                                .expect("PE file is missing optional header");
+                            let binms::pe::OptionalHeader::Coff(cough) = optional_header
+                                else { panic!("PE file's optional header is not COFF") };
+                            let optional_win_header = cough.optional_windows_header.as_ref()
+                                .expect("PE file's COFF optional header does not contain the optional Windows header");
+                            let res_entry = optional_win_header.known_data_directory_entry(binms::pe::KnownDataDirectoryEntry::ResourceTable)
+                                .expect("PE file does not have a resource directory entry");
+                            let resources = binms::pe::ResourceDirectoryTable::read_root_from_pe(&mut input_file, &res_entry, &pe.section_table)
+                                .expect("failed to read resources");
+
+                            // abide by the three-layer structure: type -> resource -> language
+                            let relevant_resource_types = [
+                                binms::pe::ResourceIdentifier::Integer(1), // cursor
+                                binms::pe::ResourceIdentifier::Integer(3), // icon
+                            ];
+                            for resource_type in relevant_resource_types {
+                                if let Some(want_type) = args.res_type {
+                                    let binms::pe::ResourceIdentifier::Integer(this_type) = resource_type
+                                        else { continue };
+                                    if want_type != this_type {
+                                        continue;
+                                    }
+                                }
+
+                                let Some(binms::pe::ResourceChild::Subdirectory(resources))
+                                    = resources.id_to_entry.get(&resource_type)
+                                    else { continue };
+                                for (resource_id, resource) in &resources.id_to_entry {
+                                    if let Some(want_id) = args.res_id {
+                                        let binms::pe::ResourceIdentifier::Integer(this_id) = resource_id
+                                            else { continue };
+                                        if want_id != *this_id {
+                                            continue;
+                                        }
+                                    }
+
+                                    let binms::pe::ResourceChild::Subdirectory(langs)
+                                        = resource
+                                        else { continue };
+                                    for (lang_id, resource_data_child) in &langs.id_to_entry {
+                                        if let Some(want_lang) = args.res_lang {
+                                            let binms::pe::ResourceIdentifier::Integer(this_lang) = lang_id
+                                                else { continue };
+                                            if want_lang != *this_lang {
+                                                continue;
+                                            }
+                                        }
+
+                                        let binms::pe::ResourceChild::Data(data)
+                                            = resource_data_child
+                                            else { continue };
+                                        let Some(data_bytes): Option<&[u8]> = data.data
+                                            .as_ref().map(|d| d.as_ref())
+                                            else { continue };
+
+                                        if data_bytes.starts_with(b"\x89PNG\r\n\x1A\n") {
+                                            // sweet, it's already a PNG, just dump it out
+                                            println!("{:?}/{:?}/{:?} PNG", resource_type, resource_id, lang_id);
+
+                                            let mut f = File::create(&args.output_file)
+                                                .expect("failed to open output file");
+                                            f.write_all(data_bytes)
+                                                .expect("failed to write output file");
+                                            f.flush()
+                                                .expect("failed to flush output file");
+                                        }
+
+                                        // try interpreting this as a standard Windows icon (v3 bitmap)
+                                        let Ok((_rest, bmp)) = binms::bitmap::Bitmap::take_from_bytes(data_bytes, true)
+                                            else { continue };
+
+                                        println!("{:?}/{:?}/{:?} BMP", resource_type, resource_id, lang_id);
+
+                                        // spit it out as a PNG
+                                        let f = File::create(&args.output_file)
+                                            .expect("failed to open output file");
+                                        let mut png = png::Encoder::new(
+                                            f,
+                                            bmp.actual_width(),
+                                            bmp.actual_height(),
+                                        );
+                                        png.set_color(png::ColorType::Rgba);
+                                        png.set_depth(png::BitDepth::Eight);
+                                        let mut writer = png.write_header()
+                                            .expect("failed to write PNG header");
+                                        writer.write_image_data(&bmp.to_rgba8())
+                                            .expect("failed to write PNG data");
+                                        writer.finish()
+                                            .expect("failed to finish PNG");
+                                    }
+                                }
+                            }
                         },
                     }
                 },
