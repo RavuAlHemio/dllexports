@@ -717,6 +717,12 @@ bitflags! {
     pub struct ExeFlags : u16 {
         const SINGLE_DATA = 0x0001;
         const MULTIPLE_DATA = 0x0002;
+        const GLOBAL_INIT = 0x0004;
+        const PROTECTED_MODE_ONLY = 0x0008;
+        const INSTRUCTIONS_8086 = 0x0010;
+        const INSTRUCTIONS_286 = 0x0020;
+        const INSTRUCTIONS_386 = 0x0040;
+        const INSTRUCTIONS_FPU = 0x0080;
         const LINK_ERRORS = 0x2000;
         const LIBRARY_MODULE = 0x8000;
     }
