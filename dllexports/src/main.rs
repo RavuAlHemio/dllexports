@@ -78,7 +78,7 @@ enum PokeExeMode {
     PeHeader(InputFileOnlyArgs),
 
     /// Outputs the resources in a PE (32-bit/64-bit Windows executable) file.
-    PeResources(InputFileOnlyArgs),
+    PeResources(InputFileJsonOutputArgs),
 
     /// Lists icon groups in a PE (32-bit/64-bit Windows executable) file.
     PeIconGroups(InputFileJsonOutputArgs),
@@ -603,7 +603,15 @@ fn main() {
                                 .expect("PE file does not have a resource directory entry");
                             let resources = binms::pe::ResourceDirectoryTable::read_root_from_pe(&mut input_file, &res_entry, &pe.section_table)
                                 .expect("failed to read resources");
-                            println!("{:#?}", resources);
+                            if args.json_output {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&resources)
+                                        .expect("failed to serialize ResourceDirectoryTable to JSON"),
+                                );
+                            } else {
+                                println!("{:#?}", resources);
+                            }
                         },
                         PokeExeMode::PeIconGroups(args) => {
                             let mut input_file = File::open(&args.input_file)

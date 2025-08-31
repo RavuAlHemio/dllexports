@@ -963,6 +963,7 @@ pub enum ExportAddressTableEntry {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ResourceDirectoryTable {
     pub characteristics: u32,
     pub timestamp: u32,
@@ -970,6 +971,7 @@ pub struct ResourceDirectoryTable {
     pub minor_version: u16,
     // name_entry_count: u16,
     // id_entry_count: u16,
+    #[cfg_attr(feature = "serde", serde(with = "serde_resource_id_child"))]
     pub id_to_entry: BTreeMap<ResourceIdentifier, ResourceChild>, // [(ResourceIdentifier, ResourceChild); name_entry_count + id_entry_count]
 }
 impl ResourceDirectoryTable {
@@ -1088,14 +1090,44 @@ impl ResourceDirectoryTable {
     }
 }
 
+/// Serializes the map of resource identifiers to resource children as pairs of resource identifiers
+/// and children.
+///
+/// This is done to work around limitations in some serialization formats (e.g. JSON) which only
+/// accept string keys.
+#[cfg(feature = "serde")]
+mod serde_resource_id_child {
+    use std::collections::BTreeMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use super::{ResourceChild, ResourceIdentifier};
+
+    pub(crate) fn serialize<S: Serializer>(value: &BTreeMap<ResourceIdentifier, ResourceChild>, serializer: S) -> Result<S::Ok, S::Error> {
+        let vector: Vec<(&ResourceIdentifier, &ResourceChild)> = value
+            .iter()
+            .collect();
+        vector.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'d, D: Deserializer<'d>>(deserializer: D) -> Result<BTreeMap<ResourceIdentifier, ResourceChild>, D::Error> {
+        let vector: Vec<(ResourceIdentifier, ResourceChild)> = Vec::deserialize(deserializer)?;
+        let map: BTreeMap<ResourceIdentifier, ResourceChild> = vector
+            .into_iter()
+            .collect();
+        Ok(map)
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
 pub enum ResourceIdentifier {
     Name(String), // name_offset: u32 -> Pascal UTF-16LE string
     Integer(u32),
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", rename_all = "kebab-case"))]
 pub enum ResourceChild {
     Data(ResourceData),
     Subdirectory(ResourceDirectoryTable),
@@ -1128,6 +1160,7 @@ impl ResourceChild {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ResourceData {
     pub data_rva: u32,
     pub size: u32,
