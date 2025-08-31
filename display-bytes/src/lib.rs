@@ -71,6 +71,7 @@ impl<const SIZE: usize> IndexMut<usize> for DisplayBytes<SIZE> {
 
 
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct DisplayBytesVec(Vec<u8>);
 impl Default for DisplayBytesVec {
     fn default() -> Self {

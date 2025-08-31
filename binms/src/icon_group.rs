@@ -17,6 +17,7 @@ impl std::error::Error for Error {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct IconGroup {
     pub reserved: u16, // 0x0000
     pub group_type: u16, // 0x0001
@@ -59,6 +60,7 @@ impl IconGroup {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct GroupIcon {
     pub width: u8,
     pub height: u8,

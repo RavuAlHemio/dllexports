@@ -464,6 +464,7 @@ pub enum FixupType {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum ResourceId {
     Numbered(u16),
     Named(DisplayBytesVec),

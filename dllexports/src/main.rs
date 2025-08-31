@@ -69,7 +69,7 @@ enum PokeExeMode {
     NeHeader(InputFileOnlyArgs),
 
     /// Lists icon groups in an NE (16-bit Windows executable) file.
-    NeIconGroups(InputFileOnlyArgs),
+    NeIconGroups(InputFileJsonOutputArgs),
 
     /// Outputs icons in an NE (16-bit Windows executable) file.
     NeIcons(InputFileNeResourceGraphicsArgs),
@@ -81,7 +81,7 @@ enum PokeExeMode {
     PeResources(InputFileOnlyArgs),
 
     /// Lists icon groups in a PE (32-bit/64-bit Windows executable) file.
-    PeIconGroups(InputFileOnlyArgs),
+    PeIconGroups(InputFileJsonOutputArgs),
 
     /// Outputs icons in a PE (32-bit/64-bit Windows executable) file.
     PeIcons(InputFilePeResourceGraphicsArgs),
@@ -103,6 +103,16 @@ struct ExpandArgs {
 struct InputFileOnlyArgs {
     pub input_file: PathBuf,
 }
+
+#[derive(Parser)]
+struct InputFileJsonOutputArgs {
+    /// Output the collected information as JSON.
+    #[arg(short, long)]
+    pub json_output: bool,
+
+    pub input_file: PathBuf,
+}
+
 
 #[derive(Parser)]
 struct InputFileAndIndexArgs {
@@ -348,14 +358,35 @@ fn main() {
                                     _ => continue,
                                 }
 
+                                let mut json_groups = Vec::with_capacity(res_type.resources.len());
                                 for (res_id, res) in &res_type.resources {
                                     let data: &[u8] = res.data.as_ref();
                                     let Ok((_rest, icon_group)) = binms::icon_group::IconGroup::take_from_bytes(data)
-                                        else { println!("butts"); continue; };
-                                    println!("icon group {:?}:", res_id);
-                                    for icon in icon_group.icons {
-                                        println!("  {:?} ({})", icon, icon.id + 0x8000);
+                                        else { continue; };
+                                    if !args.json_output {
+                                        println!("icon group {:?}:", res_id);
                                     }
+                                    let mut json_icons = Vec::with_capacity(icon_group.icons.len());
+                                    for icon in icon_group.icons {
+                                        if args.json_output {
+                                            let mut icon_value = serde_json::to_value(&icon)
+                                                .expect("failed to serialize icon");
+                                            icon_value["raw_id"] = serde_json::Value::from(icon.id + 0x8000);
+                                            json_icons.push(icon_value);
+                                        } else {
+                                            println!("  {:?} ({})", icon, icon.id + 0x8000);
+                                        }
+                                    }
+                                    if args.json_output {
+                                        json_groups.push(serde_json::json!({
+                                            "group_id": res_id,
+                                            "icons": json_icons,
+                                        }));
+                                    }
+                                }
+
+                                if args.json_output {
+                                    println!("{}", serde_json::to_string_pretty(&json_groups).expect("failed to JSONify"));
                                 }
                             }
                         },

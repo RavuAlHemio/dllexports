@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-binms = { path = "../binms" }
+binms = { path = "../binms", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 display-bytes = { path = "../display-bytes" }
 expandms = { path = "../expandms" }
 lzxd = { version = "0.2" }
 png = { version = "0.17" }
+serde_json = { version = "1.0" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
