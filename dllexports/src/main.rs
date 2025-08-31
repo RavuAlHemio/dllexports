@@ -481,7 +481,7 @@ fn main() {
                                                                 .expect("failed to flush output file");
                                                         },
                                                         GraphicsOutputFormat::Png => {
-                                                            let mut f = File::create(&args.output_file)
+                                                            let f = File::create(&args.output_file)
                                                                 .expect("failed to open output file");
 
                                                             let width = usize::try_from(variant_icon.width_bytes).unwrap();
@@ -555,7 +555,7 @@ fn main() {
 
                                                 println!("original bit depth: {}", icon.header.bit_count);
 
-                                                let mut f = File::create(&args.output_file)
+                                                let f = File::create(&args.output_file)
                                                     .expect("failed to open output file");
 
                                                 let mut encoder = png::Encoder::new(
@@ -626,14 +626,17 @@ fn main() {
                                 binms::pe::ResourceIdentifier::Integer(12), // cursor group
                                 binms::pe::ResourceIdentifier::Integer(14), // icon group
                             ];
+                            let mut json_types_resources_langs = Vec::new();
                             for resource_type in relevant_resource_types {
                                 let Some(binms::pe::ResourceChild::Subdirectory(resources))
                                     = resources.id_to_entry.get(&resource_type)
                                     else { continue };
+                                let mut json_resources_langs = Vec::new();
                                 for (resource_id, resource) in &resources.id_to_entry {
                                     let binms::pe::ResourceChild::Subdirectory(langs)
                                         = resource
                                         else { continue };
+                                    let mut json_langs = Vec::new();
                                     for (lang_id, resource_data_child) in &langs.id_to_entry {
                                         let binms::pe::ResourceChild::Data(data)
                                             = resource_data_child
@@ -646,12 +649,39 @@ fn main() {
                                         let Ok((_rest, ig)) = binms::icon_group::IconGroup::take_from_bytes(data_bytes)
                                             else { continue };
 
-                                        println!("{:?}/{:?}/{:?}:", resource_type, resource_id, lang_id);
-                                        for icon in &ig.icons {
-                                            println!("  {:?}", icon);
+                                        if args.json_output {
+                                            json_langs.push(serde_json::json!({
+                                                "lang_id": lang_id,
+                                                "icon_group": ig,
+                                            }));
+                                        } else {
+                                            println!("{:?}/{:?}/{:?}:", resource_type, resource_id, lang_id);
+                                            for icon in &ig.icons {
+                                                println!("  {:?}", icon);
+                                            }
                                         }
                                     }
+                                    if args.json_output {
+                                        json_resources_langs.push(serde_json::json!({
+                                            "resource_id": resource_id,
+                                            "langs": json_langs,
+                                        }));
+                                    }
                                 }
+                                if args.json_output {
+                                    json_types_resources_langs.push(serde_json::json!({
+                                        "type_id": resource_type,
+                                        "resources": json_resources_langs,
+                                    }));
+                                }
+                            }
+
+                            if args.json_output {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&json_types_resources_langs)
+                                        .expect("failed to serialize serde_json::Value?!"),
+                                );
                             }
                         },
                         PokeExeMode::PeIcons(args) => {

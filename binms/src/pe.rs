@@ -1089,6 +1089,7 @@ impl ResourceDirectoryTable {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum ResourceIdentifier {
     Name(String), // name_offset: u32 -> Pascal UTF-16LE string
     Integer(u32),
