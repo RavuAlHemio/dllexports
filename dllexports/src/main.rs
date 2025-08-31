@@ -66,7 +66,7 @@ enum PokeExeMode {
     MzHeader(InputFileOnlyArgs),
 
     /// Outputs the header of an NE (16-bit Windows executable) file.
-    NeHeader(InputFileOnlyArgs),
+    NeHeader(InputFileJsonOutputArgs),
 
     /// Lists icon groups in an NE (16-bit Windows executable) file.
     NeIconGroups(InputFileJsonOutputArgs),
@@ -152,6 +152,7 @@ struct InputFileNeResourceGraphicsArgs {
 struct InputFilePeResourceGraphicsArgs {
     #[arg(short = 't', long = "type")] pub res_type: Option<u32>,
     #[arg(short = 'i', long = "id")] pub res_id: Option<u32>,
+    #[arg(short = 'I', long = "id-name")] pub res_id_name: Option<String>,
     #[arg(short = 'l', long = "lang")] pub res_lang: Option<u32>,
     pub input_file: PathBuf,
     pub output_file: PathBuf,
@@ -339,7 +340,12 @@ fn main() {
 
                             let ne = binms::ne::Executable::read(&mut input_file)
                                 .expect("failed to read NE header");
-                            println!("{:#?}", ne);
+
+                            if args.json_output {
+                                println!("{}", serde_json::to_string_pretty(&ne).expect("failed to JSONify"));
+                            } else {
+                                println!("{:#?}", ne);
+                            }
                         },
                         PokeExeMode::NeIconGroups(args) => {
                             let mut input_file = File::open(&args.input_file)
@@ -730,6 +736,12 @@ fn main() {
                                         let binms::pe::ResourceIdentifier::Integer(this_id) = resource_id
                                             else { continue };
                                         if want_id != *this_id {
+                                            continue;
+                                        }
+                                    } else if let Some(want_id) = args.res_id_name.as_ref() {
+                                        let binms::pe::ResourceIdentifier::Name(this_id) = resource_id
+                                            else { continue };
+                                        if want_id != this_id {
                                             continue;
                                         }
                                     }

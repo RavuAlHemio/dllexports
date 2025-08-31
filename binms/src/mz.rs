@@ -14,6 +14,7 @@ pub const BYTES_PER_PAGE: usize = 512;
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Executable {
     // signature: b"MZ",
     pub last_page_bytes: u16,
@@ -91,6 +92,7 @@ impl Executable {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RelocationEntry {
     pub offset: u16,
     pub segment: u16,

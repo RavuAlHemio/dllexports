@@ -15,6 +15,7 @@ const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Executable {
     pub mz: crate::mz::Executable,
 
@@ -225,6 +226,7 @@ impl Executable {
 
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SegmentAndOffset {
     pub offset: u16,
     pub segment_number: u16,
@@ -245,6 +247,7 @@ impl SegmentAndOffset {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SegmentTableEntry {
     pub logical_sector_offset: u16,
     pub segment_length: u16,
@@ -414,6 +417,7 @@ impl SegmentTableEntry {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RelocationEntry {
     pub source_type: RelocationEntrySourceType, // u8
     // target_type: RelocationEntryTargetType, // lower 3 bits of u8
@@ -423,6 +427,7 @@ pub struct RelocationEntry {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum RelocationTarget {
     InternalReferenceToFixedSegment {
         segment_number: u8, // except 0xFF
@@ -453,6 +458,7 @@ pub enum RelocationTarget {
 
 #[derive(Clone, Copy, Debug)]
 #[from_to_other(base_type = u16, derive_compare = "as_int")]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum FixupType {
     FiarqqFjarqq = 0x0001,
     FisrqqFjsrqq = 0x0002,
@@ -499,8 +505,11 @@ impl ResourceId {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ResourceTable {
     pub alignment_shift_count: u16,
+
+    #[cfg_attr(feature = "serde", serde(with = "serde_resource_id_value"))]
     pub id_to_type: BTreeMap<ResourceId, ResourceType>,
 }
 impl ResourceTable {
@@ -574,15 +583,46 @@ impl ResourceTable {
     }
 }
 
+/// Serializes the map of resource identifiers to some serializable value as pairs of resource
+/// identifiers and values.
+///
+/// This is done to work around limitations in some serialization formats (e.g. JSON) which only
+/// accept string keys.
+#[cfg(feature = "serde")]
+mod serde_resource_id_value {
+    use std::collections::BTreeMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use super::ResourceId;
+
+    pub(crate) fn serialize<S: Serializer, V: Serialize>(value: &BTreeMap<ResourceId, V>, serializer: S) -> Result<S::Ok, S::Error> {
+        let vector: Vec<(&ResourceId, &V)> = value
+            .iter()
+            .collect();
+        vector.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'d, D: Deserializer<'d>, V: Deserialize<'d>>(deserializer: D) -> Result<BTreeMap<ResourceId, V>, D::Error> {
+        let vector: Vec<(ResourceId, V)> = Vec::deserialize(deserializer)?;
+        let map: BTreeMap<ResourceId, V> = vector
+            .into_iter()
+            .collect();
+        Ok(map)
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ResourceType {
     pub type_id: ResourceId,
     // count: u16,
     pub reserved: u32,
+
+    #[cfg_attr(feature = "serde", serde(with = "serde_resource_id_value"))]
     pub resources: BTreeMap<ResourceId, Resource>, // [Resource; count],
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Resource {
     pub resource_offset_units: u16, // (relative to beginning of file, units of (1 << alignment_shift_count))
     pub resource_length_units: u16, // (units of (1 << alignment_shift_count))
@@ -593,6 +633,7 @@ pub struct Resource {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NameTableEntry {
     // length: u8,
     pub name: DisplayBytesVec, // [u8; length],
@@ -633,6 +674,7 @@ impl NameTableEntry {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum EntryBundle {
     // number_of_entries: u8,
     // segment_indicator: u8, (discriminant)
@@ -653,12 +695,14 @@ pub enum EntryBundle {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct FixedSegmentEntry {
     pub flags: SegmentEntryFlags, // u8
     pub entry_point_offset: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MoveableSegmentEntry {
     pub flags: SegmentEntryFlags, // u8
     pub int_3fh: [u8; 2],
@@ -669,6 +713,7 @@ pub struct MoveableSegmentEntry {
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
     pub struct ExeFlags : u16 {
         const SINGLE_DATA = 0x0001;
         const MULTIPLE_DATA = 0x0002;
@@ -677,6 +722,7 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
     pub struct SegmentFlags : u16 {
         const DATA = 0x0001;
         const MOVEABLE = 0x0010;
@@ -686,6 +732,7 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
     pub struct ResourceFlags : u16 {
         const MOVEABLE = 0x0010;
         const PURE = 0x0020;
@@ -693,12 +740,14 @@ bitflags! {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
     pub struct SegmentEntryFlags : u8 {
         const EXPORTED = 0x01;
         const SHARED_DATA = 0x02;
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
     pub struct RelocationEntryFlags : u8 {
         const ADDITIVE = 0x04;
     }
@@ -712,6 +761,7 @@ impl SegmentFlags {
 
 #[derive(Clone, Copy, Debug)]
 #[from_to_other(base_type = u8, derive_compare = "as_int")]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum RelocationEntrySourceType {
     LowByte = 0x00,
     Segment = 0x02,
