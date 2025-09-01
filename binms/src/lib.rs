@@ -1,8 +1,11 @@
 pub mod bitmap;
+pub mod bitmap_font;
 pub mod ico1;
 pub mod icon_group;
+#[macro_use] pub(crate) mod macros;
 pub mod mz;
 pub mod ne;
+pub mod part_int;
 pub mod pe;
 
 
