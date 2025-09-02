@@ -3,6 +3,7 @@ mod formats;
 mod read_ext;
 
 
+use std::ffi::OsString;
 use std::fs::{read_dir, File};
 use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -74,6 +75,13 @@ enum PokeExeMode {
     /// Outputs icons in an NE (16-bit Windows executable) file.
     NeIcons(InputFileNeResourceGraphicsArgs),
 
+    /// Outputs fonts in an NE file.
+    ///
+    /// `.fon` files are generally NE executables with no executable code; the fonts themselves are
+    /// stored as resources of type 0x8008 (RT_FONT) in the `.fnt` format, which exists in three
+    /// versions.
+    NeFonts(FontArgs),
+
     /// Outputs the header of a PE (32-bit/64-bit Windows executable) file.
     PeHeader(InputFileOnlyArgs),
 
@@ -102,6 +110,21 @@ struct ExpandArgs {
 #[derive(Parser)]
 struct InputFileOnlyArgs {
     pub input_file: PathBuf,
+}
+
+#[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd, ValueEnum)]
+enum FontFormat {
+    #[default] Bdf,
+    Fnt,
+}
+
+#[derive(Parser)]
+struct FontArgs {
+    #[arg(short, long, default_value = "bdf")]
+    pub font_format: FontFormat,
+
+    pub input_file: PathBuf,
+    pub output_prefix: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -584,6 +607,61 @@ fn main() {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        },
+                        PokeExeMode::NeFonts(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let ne = binms::ne::Executable::read(&mut input_file)
+                                .expect("failed to read NE header");
+                            const NE_RT_FONT: u16 = 0x8000 | 8;
+                            let res_type = ne.resource_table.id_to_type.get(&binms::ne::ResourceId::Numbered(NE_RT_FONT))
+                                .expect("no fonts in NE file");
+                            for font_resource in res_type.resources.values() {
+                                println!("font {:?}:", font_resource.resource_id);
+                                let (_rest, font) = binms::bitmap_font::Font::take_from_bytes(font_resource.data.as_ref())
+                                    .expect("failed to load bitmap font");
+
+                                let ext = match args.font_format {
+                                    FontFormat::Bdf => "bdf",
+                                    FontFormat::Fnt => "fnt",
+                                };
+
+                                if let Some(mut output_path) = args.output_prefix.clone() {
+                                    let resource_name = match &font_resource.resource_id {
+                                        binms::ne::ResourceId::Numbered(num) => format!("i{}.{}", num, ext),
+                                        binms::ne::ResourceId::Named(name_display) => {
+                                            let name_bytes: &[u8] = name_display.as_ref();
+                                            let mut name = String::with_capacity(1 + name_bytes.len() + 4);
+                                            name.push('s');
+                                            for b in name_bytes {
+                                                let c = char::from_u32((*b).into()).unwrap();
+                                                name.push(c);
+                                            }
+                                            name.push('.');
+                                            name.push_str(ext);
+                                            name
+                                        },
+                                    };
+                                    let os_name = OsString::try_from(resource_name).unwrap();
+                                    // extend last segment with our resource suffix
+                                    output_path.as_mut_os_string().push(&os_name);
+
+                                    match args.font_format {
+                                        FontFormat::Bdf => {
+                                            let bdf = font.to_bdf();
+                                            std::fs::write(&output_path, bdf.as_bytes())
+                                                .expect("failed to write BDF");
+                                        },
+                                        FontFormat::Fnt => {
+                                            let data: &[u8] = font_resource.data.as_ref();
+                                            std::fs::write(&output_path, data)
+                                                .expect("failed to write FNT");
+                                        },
+                                    }
+                                } else {
+                                    println!("{:#?}", font);
                                 }
                             }
                         },

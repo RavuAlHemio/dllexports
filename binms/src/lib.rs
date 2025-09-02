@@ -29,6 +29,17 @@ pub(crate) fn read_nul_terminated_ascii_string<R: Read>(reader: &mut R) -> Resul
         .map_err(|_| io::ErrorKind::InvalidData.into())
 }
 
+pub(crate) fn collect_nul_terminated_ascii_string(bytes: &[u8]) -> Option<String> {
+    let nul_pos = bytes
+        .iter()
+        .position(|b| *b == 0x00)
+        .unwrap_or(bytes.len());
+    let subslice = &bytes[..nul_pos];
+    std::str::from_utf8(subslice)
+        .ok()
+        .map(|s| s.to_owned())
+}
+
 pub(crate) fn read_pascal_utf16le_string<R: Read>(reader: &mut R) -> Result<String, io::Error> {
     let mut length_buf = [0u8; 2];
     reader.read_exact(&mut length_buf)?;
