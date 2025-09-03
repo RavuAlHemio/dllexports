@@ -496,6 +496,13 @@ impl Font {
         writeln!(ret, "weight {}", self.weight).unwrap();
         writeln!(ret, "charset {}", self.char_set).unwrap();
 
+        // output empty characters at the start
+        for char_index in 0..self.first_char {
+            writeln!(ret).unwrap();
+            writeln!(ret, "char {}", char_index).unwrap();
+            writeln!(ret, "width 0").unwrap();
+        }
+
         for char_index in 0..usize::from(char_count) {
             writeln!(ret).unwrap();
             writeln!(ret, "char {}", char_index + usize::from(self.first_char)).unwrap();
@@ -567,6 +574,13 @@ impl Font {
                     }
                 },
             };
+        }
+
+        // output empty characters at the end
+        for char_index in self.last_char..=255 {
+            writeln!(ret).unwrap();
+            writeln!(ret, "char {}", char_index).unwrap();
+            writeln!(ret, "width 0").unwrap();
         }
 
         ret
