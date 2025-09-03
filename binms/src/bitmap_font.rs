@@ -482,7 +482,8 @@ impl Font {
         let char_count = (self.last_char - self.first_char) + 1;
 
         let copyright_string = std::str::from_utf8(self.copyright.as_ref())
-            .expect("copyright string not valid");
+            .expect("copyright string not valid")
+            .trim_end_matches('\0');
 
         writeln!(ret, "facename {}", self.name).unwrap();
         writeln!(ret, "copyright {}", copyright_string).unwrap();
