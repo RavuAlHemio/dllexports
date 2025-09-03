@@ -116,6 +116,7 @@ struct InputFileOnlyArgs {
 enum FontFormat {
     #[default] Bdf,
     Fnt,
+    Fd,
 }
 
 #[derive(Parser)]
@@ -626,6 +627,7 @@ fn main() {
                                 let ext = match args.font_format {
                                     FontFormat::Bdf => "bdf",
                                     FontFormat::Fnt => "fnt",
+                                    FontFormat::Fd => "fd",
                                 };
 
                                 if let Some(mut output_path) = args.output_prefix.clone() {
@@ -658,6 +660,11 @@ fn main() {
                                             let data: &[u8] = font_resource.data.as_ref();
                                             std::fs::write(&output_path, data)
                                                 .expect("failed to write FNT");
+                                        },
+                                        FontFormat::Fd => {
+                                            let fd = font.to_fd();
+                                            std::fs::write(&output_path, fd.as_bytes())
+                                                .expect("failed to write FD");
                                         },
                                     }
                                 } else {

@@ -341,6 +341,25 @@ impl Font {
         Ok((rest, font))
     }
 
+    fn transpose_bytes(bytes: &[u8], width_bytes: usize, pixel_height: usize) -> Vec<u8> {
+        // multi-byte characters must be transposed
+        // because V2/V3 encodes characters as such:
+        // first, all rows of the first 8-pixel column are output
+        // then the rows of the next 8-pixel column
+        // etc.
+        let mut transposed = vec![0u8; bytes.len()];
+
+        for column_index in 0..width_bytes {
+            for row_index in 0..pixel_height {
+                let source_index = column_index * usize::from(pixel_height) + row_index;
+                let target_index = row_index * width_bytes + column_index;
+                transposed[target_index] = bytes[source_index];
+            }
+        }
+
+        transposed
+    }
+
     pub fn to_bdf(&self) -> String {
         use std::fmt::Write as _;
 
@@ -420,23 +439,8 @@ impl Font {
 
                     let bitmap: &[u8] = self.bitmap.as_ref();
                     let slice = &bitmap[bitmap_offset..bitmap_offset+total_bytes];
+                    let transposed = Self::transpose_bytes(slice, width_bytes, self.pixel_height.into());
 
-                    // multi-byte characters must be transposed
-                    // because V2/V3 encodes characters as such:
-                    // first, all rows of the first 8-pixel column are output
-                    // then the rows of the next 8-pixel column
-                    // etc.
-                    let mut transposed = vec![0u8; slice.len()];
-
-                    for column_index in 0..width_bytes {
-                        for row_index_u16 in 0..self.pixel_height {
-                            let row_index: usize = row_index_u16.into();
-
-                            let source_index = column_index * usize::from(self.pixel_height) + row_index;
-                            let target_index = row_index * width_bytes + column_index;
-                            transposed[target_index] = slice[source_index];
-                        }
-                    }
                     for row in transposed.chunks(width_bytes) {
                         for byte in row.iter().copied() {
                             write!(ret, "{:02X}", byte).unwrap();
@@ -451,18 +455,8 @@ impl Font {
 
                     let bitmap: &[u8] = self.bitmap.as_ref();
                     let slice = &bitmap[bitmap_offset..bitmap_offset+total_bytes];
+                    let transposed = Self::transpose_bytes(slice, width_bytes, self.pixel_height.into());
 
-                    let mut transposed = vec![0u8; slice.len()];
-
-                    for column_index in 0..width_bytes {
-                        for row_index_u16 in 0..self.pixel_height {
-                            let row_index: usize = row_index_u16.into();
-
-                            let source_index = column_index * usize::from(self.pixel_height) + row_index;
-                            let target_index = row_index * width_bytes + column_index;
-                            transposed[target_index] = slice[source_index];
-                        }
-                    }
                     for row in transposed.chunks(width_bytes) {
                         for byte in row.iter().copied() {
                             write!(ret, "{:02X}", byte).unwrap();
@@ -476,6 +470,100 @@ impl Font {
         }
 
         writeln!(ret, "ENDFONT").unwrap();
+        ret
+    }
+
+    pub fn to_fd(&self) -> String {
+        // font format from https://www.chiark.greenend.org.uk/~sgtatham/fonts/
+        use std::fmt::Write as _;
+
+        let mut ret = String::new();
+
+        let char_count = (self.last_char - self.first_char) + 1;
+
+        writeln!(ret, "facename {}", self.name).unwrap();
+        writeln!(ret, "height {}", self.pixel_height).unwrap();
+        writeln!(ret, "ascent {}", self.ascent).unwrap();
+        writeln!(ret, "pointsize {}", self.point_size).unwrap();
+        writeln!(ret, "italic {}", self.italic.as_fd_str()).unwrap();
+        writeln!(ret, "underline {}", self.underline.as_fd_str()).unwrap();
+        writeln!(ret, "strikeout {}", self.strike_out.as_fd_str()).unwrap();
+        writeln!(ret, "weight {}", self.weight).unwrap();
+        writeln!(ret, "charset {}", self.char_set).unwrap();
+
+        for char_index in 0..usize::from(char_count) {
+            writeln!(ret).unwrap();
+            writeln!(ret, "char {}", char_index + usize::from(self.first_char)).unwrap();
+
+            let char_pixel_width = match &self.version_specific {
+                VersionSpecific::V1 { bit_offsets, .. } => {
+                    bit_offsets[char_index + 1] - bit_offsets[char_index]
+                },
+                VersionSpecific::V2 { char_table, .. } => {
+                    char_table[char_index].width
+                },
+                VersionSpecific::V3 { char_table, .. } => {
+                    char_table[char_index].width
+                },
+            };
+            writeln!(ret, "width {}", char_pixel_width).unwrap();
+
+            // read the character
+            match &self.version_specific {
+                VersionSpecific::V1 { bit_offsets, .. } => {
+                    let row_length_bytes = usize::from(self.bytes_per_row);
+                    let bit_offset = usize::from(bit_offsets[char_index]);
+                    let width = usize::from(bit_offsets[char_index+1]) - bit_offset;
+
+                    let bitmap: &[u8] = self.bitmap.as_ref();
+                    for row in bitmap.chunks(row_length_bytes) {
+                        let char_bits = row
+                            .iter()
+                            .copied()
+                            .bytes_to_bits()
+                            .skip(bit_offset)
+                            .take(width);
+                        for bit in char_bits {
+                            ret.push(if bit { '1' } else { '0' });
+                        }
+                        writeln!(ret).unwrap();
+                    }
+                },
+                VersionSpecific::V2 { char_table, .. } => {
+                    let width_bytes = (usize::from(char_table[char_index].width) + (8 - 1)) / 8;
+                    let bitmap_offset = usize::from(char_table[char_index].offset) - usize::try_from(self.bits_offset).unwrap();
+                    let total_bytes = width_bytes * usize::from(self.pixel_height);
+
+                    let bitmap: &[u8] = self.bitmap.as_ref();
+                    let slice = &bitmap[bitmap_offset..bitmap_offset+total_bytes];
+                    let transposed = Self::transpose_bytes(slice, width_bytes, self.pixel_height.into());
+
+                    for row in transposed.chunks(width_bytes) {
+                        for bit in row.iter().copied().bytes_to_bits() {
+                            ret.push(if bit { '1' } else { '0' });
+                        }
+                        writeln!(ret).unwrap();
+                    }
+                },
+                VersionSpecific::V3 { char_table, .. } => {
+                    let width_bytes = (usize::from(char_table[char_index].width) + (8 - 1)) / 8;
+                    let bitmap_offset = usize::try_from(char_table[char_index].offset).unwrap() - usize::try_from(self.bits_offset).unwrap();
+                    let total_bytes = width_bytes * usize::from(self.pixel_height);
+
+                    let bitmap: &[u8] = self.bitmap.as_ref();
+                    let slice = &bitmap[bitmap_offset..bitmap_offset+total_bytes];
+                    let transposed = Self::transpose_bytes(slice, width_bytes, self.pixel_height.into());
+
+                    for row in transposed.chunks(width_bytes) {
+                        for byte in row.iter().copied() {
+                            write!(ret, "{:02X}", byte).unwrap();
+                        }
+                        writeln!(ret).unwrap();
+                    }
+                },
+            };
+        }
+
         ret
     }
 }
@@ -552,6 +640,15 @@ macro_rules! bottom_bit {
             #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
             pub struct $struct_name : u8 {
                 const $flag_name = 0x0001;
+            }
+        }
+        impl $struct_name {
+            pub fn as_fd_str(&self) -> &'static str {
+                if self.contains(Self::$flag_name) {
+                    "yes"
+                } else {
+                    "no"
+                }
             }
         }
     };
