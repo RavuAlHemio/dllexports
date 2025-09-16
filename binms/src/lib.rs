@@ -1,5 +1,6 @@
 pub mod bitmap;
 pub mod bitmap_font;
+pub mod code_view;
 pub mod ico1;
 pub mod icon_group;
 #[macro_use] pub(crate) mod macros;
@@ -41,6 +42,7 @@ pub(crate) fn collect_nul_terminated_ascii_string(bytes: &[u8]) -> Option<String
         .map(|s| s.to_owned())
 }
 
+/// Reads a UTF-16LE string that is prefixed by a u16le length.
 pub(crate) fn read_pascal_utf16le_string<R: Read>(reader: &mut R) -> Result<String, io::Error> {
     let mut length_buf = [0u8; 2];
     reader.read_exact(&mut length_buf)?;
@@ -57,4 +59,14 @@ pub(crate) fn read_pascal_utf16le_string<R: Read>(reader: &mut R) -> Result<Stri
     String::from_utf16(&words)
         .inspect_err(|_| debug!("Pascal little-endian wide string is invalid UTF-16"))
         .map_err(|_| io::ErrorKind::InvalidData.into())
+}
+
+/// Reads a byte string that is prefixed by a u8 length.
+pub(crate) fn read_pascal_byte_string<R: Read>(reader: &mut R) -> Result<Vec<u8>, io::Error> {
+    let mut length_buf = [0u8; 1];
+    reader.read_exact(&mut length_buf)?;
+
+    let mut string_bytes = vec![0u8; usize::from(length_buf[0])];
+    reader.read_exact(&mut string_bytes)?;
+    Ok(string_bytes)
 }

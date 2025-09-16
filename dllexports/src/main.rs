@@ -5,7 +5,7 @@ mod read_ext;
 
 use std::ffi::OsString;
 use std::fs::{read_dir, File};
-use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, ValueEnum};
@@ -93,6 +93,9 @@ enum PokeExeMode {
 
     /// Outputs icons in a PE (32-bit/64-bit Windows executable) file.
     PeIcons(InputFilePeResourceGraphicsArgs),
+
+    /// Outputs general information about an NT4-era .DBG file.
+    Nt4DbgInfo(InputFileJsonOutputArgs),
 }
 
 #[derive(Parser)]
@@ -886,6 +889,34 @@ fn main() {
                                             .expect("failed to finish PNG");
                                     }
                                 }
+                            }
+                        },
+                        PokeExeMode::Nt4DbgInfo(args) => {
+                            // try reading the debug file
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let dbg_file = binms::nt4dbg::DbgFile::read(&mut input_file)
+                                .expect("failed to read .dbg file");
+                            let code_view_info = dbg_file.debug_directories
+                                .iter()
+                                .filter(|entry| entry.kind == binms::nt4dbg::DebugType::CodeView)
+                                .nth(0)
+                                .expect(".dbg file contains no CodeView section");
+
+                            let code_view_size: usize = code_view_info.size.try_into().unwrap();
+                            input_file.seek(SeekFrom::Start(code_view_info.raw_data_pointer.into()))
+                                .expect("failed to seek to CodeView data");
+                            let mut cv_buf = vec![0u8; code_view_size];
+                            input_file.read_exact(&mut cv_buf)
+                                .expect("failed to read CodeView data");
+
+                            let mut cv_reader = Cursor::new(&cv_buf);
+                            let cv_header = binms::code_view::DebugInfo::read(&mut cv_reader)
+                                .expect("failed to read CodeView debug info");
+                            if args.json_output {
+                                println!("{}", serde_json::to_string_pretty(&cv_header).expect("failed to JSONify"));
+                            } else {
+                                println!("{:#?}", cv_header);
                             }
                         },
                     }

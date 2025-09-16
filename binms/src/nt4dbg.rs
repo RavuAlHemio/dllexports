@@ -4,11 +4,15 @@
 use std::io::{self, Read};
 
 use from_to_repr::from_to_other;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::pe::{SectionTable, SectionTableEntry};
 
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct DbgFile {
     pub header: Header,
     pub section_table: SectionTable, // yup, same structure as PE
@@ -56,6 +60,7 @@ impl DbgFile {
 
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Header {
     pub signature: u16, // 0x4944
     pub flags: u16,
@@ -76,6 +81,11 @@ impl Header {
         reader.read_exact(&mut header_buf)?;
 
         let signature = u16::from_le_bytes(header_buf[0..2].try_into().unwrap());
+        if signature != 0x4944 {
+            error!("signature is {:#06X}, expected {:#06X}", signature, 0x4944);
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
         let flags = u16::from_le_bytes(header_buf[2..4].try_into().unwrap());
         let machine = u16::from_le_bytes(header_buf[4..6].try_into().unwrap());
         let characteristics = u16::from_le_bytes(header_buf[6..8].try_into().unwrap());
@@ -106,6 +116,7 @@ impl Header {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct DebugDirectory {
     pub characteristics: u32,
     pub time_date_stamp: u32,
@@ -145,6 +156,7 @@ impl DebugDirectory {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[from_to_other(base_type = u32, derive_compare = "as_int")]
 pub enum DebugType {
     Unknown = 0,

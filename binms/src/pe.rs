@@ -3,11 +3,14 @@
 //! The PE format was introduced in Windows NT 3.1 and Windows 95; it is based on COFF and used by
 //! Windows to this day.
 
-use std::{collections::BTreeMap, io::{self, Read, Seek, SeekFrom}};
+use std::collections::BTreeMap;
+use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
 use display_bytes::DisplayBytesVec;
 use from_to_repr::from_to_other;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::{read_nul_terminated_ascii_string, read_pascal_utf16le_string};
@@ -607,6 +610,7 @@ impl From<KnownDataDirectoryEntry> for usize {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SectionTable {
     entries: Vec<SectionTableEntry>,
 }
@@ -746,6 +750,7 @@ impl From<SectionTable> for Vec<SectionTableEntry> {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SectionTableEntry {
     pub name: [u8; 8],
     pub virtual_size: u32,
@@ -791,6 +796,7 @@ impl SectionTableEntry {
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
     pub struct SectionCharacteristics : u32 {
         const NO_PAD = 0x0000_0008;
         const CONTAINS_CODE = 0x0000_0020;
