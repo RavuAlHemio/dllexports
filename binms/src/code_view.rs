@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
 use crate::read_pascal_byte_string;
+use crate::bit_pattern_float::{
+    BitPatternF32, BitPatternF64, ComplexBitPatternF32, ComplexBitPatternF64,
+};
 use crate::int_from_byte_slice::IntFromByteSlice;
 
 
@@ -73,12 +76,20 @@ impl DebugInfo {
                 },
                 /*
                 SubsectionType::SourceLineSegment => todo!(),
-                SubsectionType::SourceLineModule => todo!(),
-                SubsectionType::Libraries => todo!(),
-                SubsectionType::GlobalSymbols => todo!(),
                 */
+                SubsectionType::SourceLineModule => {
+                    let content = SourceLineModuleSubsection::read(&mut data_reader)?;
+                    SubsectionData::SourceLineModule(content)
+                },
+                /*
+                SubsectionType::Libraries => todo!(),
+                */
+                SubsectionType::GlobalSymbols => {
+                    let content = GlobalSymbolsSubsection::read(&mut data_reader)?;
+                    SubsectionData::GlobalSymbols(content)
+                },
                 SubsectionType::GlobalPublicSymbols => {
-                    let content = GlobalPublicSymbolsSubsection::read(&mut data_reader)?;
+                    let content = GlobalSymbolsSubsection::read(&mut data_reader)?;
                     SubsectionData::GlobalPublicSymbols(content)
                 },
                 /*
@@ -88,9 +99,12 @@ impl DebugInfo {
                 SubsectionType::SegmentName => todo!(),
                 SubsectionType::PreCompile => todo!(),
                 SubsectionType::FileIndex => todo!(),
-                SubsectionType::StaticSymbols => todo!(),
-                SubsectionType::Other(_) => todo!(),
                 */
+                SubsectionType::StaticSymbols => {
+                    // very much not global symbols, but the same structure
+                    let content = GlobalSymbolsSubsection::read(&mut data_reader)?;
+                    SubsectionData::GlobalPublicSymbols(content)
+                },
                 _ => SubsectionData::Other(DisplayBytesVec::from(data)),
             };
 
@@ -220,11 +234,13 @@ pub enum SubsectionData {
     PublicSymbolsLegacy(PublicSymbolsLegacySubsection),
     PublicSymbols(PublicSymbolsSubsection),
     SourceLineSegment(SourceLineSegmentSubsection),
-    SourceLineModule(SourceLineModuleSubsection),
-    Libraries(LibrariesSubsection),
-    GlobalSymbols(GlobalSymbolsSubsection),
     */
-    GlobalPublicSymbols(GlobalPublicSymbolsSubsection),
+    SourceLineModule(SourceLineModuleSubsection),
+    /*
+    Libraries(LibrariesSubsection),
+    */
+    GlobalSymbols(GlobalSymbolsSubsection),
+    GlobalPublicSymbols(GlobalSymbolsSubsection),
     /*
     GlobalTypes(GlobalTypesSubsection),
     MakePCode(MakePCodeSubsection),
@@ -828,6 +844,17 @@ pub enum Language {
     Pascal = 4,
     Basic = 5,
     Cobol = 6,
+    Link = 7,
+    CvtRes = 8,
+    CvtPgd = 9,
+    CSharp = 10,
+    VisualBasic = 11,
+    ILAsm = 12,
+    Java = 13,
+    JScript = 14,
+    Msil = 15,
+    Hlsl = 16,
+    D = b'D',
     Other(u8),
 }
 
@@ -898,7 +925,7 @@ impl RegisterVariable {
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Constant {
     pub value_type: u16,
-    pub value: DisplayBytesVec,
+    pub value: NumericLeaf,
     pub name: DisplayBytesVec,
 }
 impl Constant {
@@ -908,11 +935,9 @@ impl Constant {
 
         let value_type = u16::from_le_byte_slice(&buf[0..2]);
 
-        // TODO: learn how to differentiate between value and name
-        let mut value_vec = Vec::new();
-        reader.read_to_end(&mut value_vec)?;
-        let value = DisplayBytesVec::from(value_vec);
-        let name = DisplayBytesVec::from(Vec::with_capacity(0));
+        let value = NumericLeaf::read(reader)?;
+        let name_vec = read_pascal_byte_string(reader)?;
+        let name = DisplayBytesVec::from(name_vec);
 
         Ok(Self {
             value_type,
@@ -1618,7 +1643,209 @@ impl PageAlignment {
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-pub struct GlobalPublicSymbolsSubsection {
+pub struct SourceLineModuleSubsection {
+    pub source_file_count: u16,
+    pub segment_count: u16,
+    pub source_file_offsets: Vec<u32>, // [u32; source_file_count]
+    pub segment_starts_ends: Vec<(u32, u32)>, // [(u32, u32); segment_count]
+    pub segment_indices: Vec<u16>, // [u16; segment_count]
+    pub padding: Option<u16>, // if segment_count % 2 == 1
+    pub source_files: Vec<SourceLineFile>, // [SourceLineFile; source_file_count]
+}
+impl SourceLineModuleSubsection {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+
+        let source_file_count = u16::from_le_byte_slice(&header_buf[0..2]);
+        let segment_count = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let source_file_count_usize = usize::from(source_file_count);
+        let segment_count_usize = usize::from(segment_count);
+
+        let mut source_file_offsets_buf = vec![0u8; 4*source_file_count_usize];
+        reader.read_exact(&mut source_file_offsets_buf)?;
+        let source_file_offsets: Vec<u32> = source_file_offsets_buf
+            .chunks(4)
+            .map(|chunk| u32::from_le_byte_slice(chunk))
+            .collect();
+
+        let mut segment_starts_ends_buf = vec![0u8; 8*segment_count_usize];
+        reader.read_exact(&mut segment_starts_ends_buf)?;
+        let segment_starts_ends: Vec<(u32, u32)> = segment_starts_ends_buf
+            .chunks(8)
+            .map(|chunk| (
+                u32::from_le_byte_slice(&chunk[0..4]),
+                u32::from_le_byte_slice(&chunk[4..8]),
+            ))
+            .collect();
+
+        let mut segment_indices_buf = vec![0u8; 2*segment_count_usize];
+        reader.read_exact(&mut segment_indices_buf)?;
+        let segment_indices: Vec<u16> = segment_indices_buf
+            .chunks(2)
+            .map(|chunk| u16::from_le_byte_slice(chunk))
+            .collect();
+
+        let padding = if segment_count % 2 == 0 {
+            None
+        } else {
+            let mut padding_buf = [0u8; 2];
+            reader.read_exact(&mut padding_buf)?;
+            Some(u16::from_le_bytes(padding_buf))
+        };
+
+        let mut source_files = Vec::with_capacity(source_file_count_usize);
+        for _ in 0..source_file_count {
+            let source_file = SourceLineFile::read(reader)?;
+            source_files.push(source_file);
+        }
+
+        Ok(Self {
+            source_file_count,
+            segment_count,
+            source_file_offsets,
+            segment_starts_ends,
+            segment_indices,
+            padding,
+            source_files,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct SourceLineFile {
+    pub segment_count: u16,
+    pub padding: u16,
+    pub source_line_offsets: Vec<u32>, // [u32; segment_count]
+    pub segment_starts_ends: Vec<(u32, u32)>, // [(u32, u32); segment_count]
+    pub name: DisplayBytesVec, // PascalString
+    pub padding2: [Option<u8>; 3], // pad to the next full u32
+    pub segments: Vec<SourceLineSegment>, // [SourceLineSegment; segment_count]
+}
+impl SourceLineFile {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+
+        let segment_count = u16::from_le_byte_slice(&header_buf[0..2]);
+        let padding = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let segment_count_usize = usize::from(segment_count);
+
+        let mut source_line_offsets_buf = vec![0u8; 4*segment_count_usize];
+        reader.read_exact(&mut source_line_offsets_buf)?;
+        let source_line_offsets: Vec<u32> = source_line_offsets_buf
+            .chunks(4)
+            .map(|chunk| u32::from_le_byte_slice(chunk))
+            .collect();
+
+        let mut segment_starts_ends_buf = vec![0u8; 8*segment_count_usize];
+        reader.read_exact(&mut segment_starts_ends_buf)?;
+        let segment_starts_ends: Vec<(u32, u32)> = segment_starts_ends_buf
+            .chunks(8)
+            .map(|chunk| (
+                u32::from_le_byte_slice(&chunk[0..4]),
+                u32::from_le_byte_slice(&chunk[4..8]),
+            ))
+            .collect();
+
+        let name_vec = read_pascal_byte_string(reader)?;
+        let name = DisplayBytesVec::from(name_vec);
+
+        let name_slice: &[u8] = name.as_ref();
+        let padding2 = match (name_slice.len() + 1) % 4 {
+            0 => [None, None, None],
+            1 => {
+                let mut padding2_buf = [0u8; 3];
+                reader.read_exact(&mut padding2_buf)?;
+                [Some(padding2_buf[0]), Some(padding2_buf[1]), Some(padding2_buf[2])]
+            },
+            2 => {
+                let mut padding2_buf = [0u8; 2];
+                reader.read_exact(&mut padding2_buf)?;
+                [Some(padding2_buf[0]), Some(padding2_buf[1]), None]
+            },
+            3 => {
+                let mut padding2_buf = [0u8; 1];
+                reader.read_exact(&mut padding2_buf)?;
+                [Some(padding2_buf[0]), None, None]
+            },
+            _ => unreachable!(),
+        };
+
+        let mut segments = Vec::with_capacity(segment_count_usize);
+        for _ in 0..segment_count_usize {
+            let segment = SourceLineSegment::read(reader)?;
+            segments.push(segment);
+        }
+
+        Ok(Self {
+            segment_count,
+            padding,
+            source_line_offsets,
+            segment_starts_ends,
+            name,
+            padding2,
+            segments,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct SourceLineSegment {
+    pub segment_index: u16,
+    pub line_pair_count: u16,
+    pub line_offsets: Vec<u32>, // [u32; line_pair_count]
+    pub line_numbers: Vec<u16>, // [u16; line_pair_count]
+    pub padding: Option<u16>, // if line_pair_count % 2 == 1
+}
+impl SourceLineSegment {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+
+        let segment_index = u16::from_le_byte_slice(&header_buf[0..2]);
+        let line_pair_count = u16::from_le_byte_slice(&header_buf[2..4]);
+        let line_pair_count_usize = usize::from(line_pair_count);
+
+        let mut line_offsets_buf = vec![0u8; 4*line_pair_count_usize];
+        reader.read_exact(&mut line_offsets_buf)?;
+        let line_offsets: Vec<u32> = line_offsets_buf
+            .chunks(4)
+            .map(|chunk| u32::from_le_byte_slice(chunk))
+            .collect();
+
+        let mut line_numbers_buf = vec![0u8; 2*line_pair_count_usize];
+        reader.read_exact(&mut line_numbers_buf)?;
+        let line_numbers: Vec<u16> = line_numbers_buf
+            .chunks(2)
+            .map(|chunk| u16::from_le_byte_slice(chunk))
+            .collect();
+
+        let padding = if line_pair_count % 2 == 0 {
+            None
+        } else {
+            let mut padding_buf = [0u8; 2];
+            reader.read_exact(&mut padding_buf)?;
+            Some(u16::from_le_bytes(padding_buf))
+        };
+
+        Ok(Self {
+            segment_index,
+            line_pair_count,
+            line_offsets,
+            line_numbers,
+            padding,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct GlobalSymbolsSubsection {
     pub symbol_hash_function_index: u16,
     pub address_hash_function_index: u16,
     pub symbols_length: u32,
@@ -1628,7 +1855,7 @@ pub struct GlobalPublicSymbolsSubsection {
     pub symbol_hash_table: DisplayBytesVec, // [u8; symbol_hash_table_length]
     pub address_hash_table: DisplayBytesVec, // [u8; address_hash_table_length]
 }
-impl GlobalPublicSymbolsSubsection {
+impl GlobalSymbolsSubsection {
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 16];
         reader.read_exact(&mut header_buf)?;
@@ -1700,5 +1927,173 @@ impl GlobalPublicSymbolsSubsection {
             symbol_hash_table,
             address_hash_table,
         })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub enum NumericLeaf {
+    Immediate(u16), // < 0x8000
+    SignedChar(i8), // 0x8000
+    SignedShort(i16), // 0x8001
+    UnsignedShort(u16), // 0x8002
+    SignedLong(i32), // 0x8003
+    UnsignedLong(u32), // 0x8004
+    Float32(BitPatternF32), // 0x8005
+    Float64(BitPatternF64), // 0x8006
+    Float80([u8; 10]), // 0x8007
+    Float128([u8; 16]), // 0x8008
+    SignedQuadWord(i64), // 0x8009
+    UnsignedQuadWord(u64), // 0x800A
+    Float48([u8; 6]), // 0x800B
+    Complex32(ComplexBitPatternF32), // 0x800C
+    Complex64(ComplexBitPatternF64), // 0x800D
+    Complex80(Complex<10>), // 0x800E
+    Complex128(Complex<16>), // 0x800F
+    String(DisplayBytesVec), // 0x8010
+}
+impl NumericLeaf {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 2];
+        reader.read_exact(&mut buf)?;
+        let value = u16::from_le_bytes(buf);
+
+        match value {
+            0x0000..=0x7FFF => Ok(Self::Immediate(value)),
+            0x8000 => {
+                let mut value_buf = [0u8];
+                reader.read_exact(&mut value_buf)?;
+                // no byte order on 8-bit integers, but be consistent
+                Ok(Self::SignedChar(i8::from_le_bytes(value_buf)))
+            },
+            0x8001 => {
+                let mut value_buf = [0u8; 2];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::SignedShort(i16::from_le_bytes(value_buf)))
+            },
+            0x8002 => {
+                let mut value_buf = [0u8; 2];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::UnsignedShort(u16::from_le_bytes(value_buf)))
+            },
+            0x8003 => {
+                let mut value_buf = [0u8; 4];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::SignedLong(i32::from_le_bytes(value_buf)))
+            },
+            0x8004 => {
+                let mut value_buf = [0u8; 4];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::UnsignedLong(u32::from_le_bytes(value_buf)))
+            },
+            0x8005 => {
+                let mut value_buf = [0u8; 4];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::Float32(BitPatternF32::from(f32::from_le_bytes(value_buf))))
+            },
+            0x8006 => {
+                let mut value_buf = [0u8; 8];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::Float64(BitPatternF64::from(f64::from_le_bytes(value_buf))))
+            },
+            0x8007 => {
+                let mut value_buf = [0u8; 10];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::Float80(value_buf))
+            },
+            0x8008 => {
+                let mut value_buf = [0u8; 16];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::Float128(value_buf))
+            },
+            0x8009 => {
+                let mut value_buf = [0u8; 8];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::SignedQuadWord(i64::from_le_bytes(value_buf)))
+            },
+            0x800A => {
+                let mut value_buf = [0u8; 8];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::UnsignedQuadWord(u64::from_le_bytes(value_buf)))
+            },
+            0x800B => {
+                let mut value_buf = [0u8; 6];
+                reader.read_exact(&mut value_buf)?;
+                Ok(Self::Float48(value_buf))
+            },
+            0x800C => {
+                let mut value_buf = [0u8; 8];
+                reader.read_exact(&mut value_buf)?;
+                let real = BitPatternF32::from(f32::from_le_bytes(value_buf[0..4].try_into().unwrap()));
+                let imag = BitPatternF32::from(f32::from_le_bytes(value_buf[4..8].try_into().unwrap()));
+                Ok(Self::Complex32(ComplexBitPatternF32 { real, imag }))
+            },
+            0x800D => {
+                let mut value_buf = [0u8; 16];
+                reader.read_exact(&mut value_buf)?;
+                let real = BitPatternF64::from(f64::from_le_bytes(value_buf[0..8].try_into().unwrap()));
+                let imag = BitPatternF64::from(f64::from_le_bytes(value_buf[8..16].try_into().unwrap()));
+                Ok(Self::Complex64(ComplexBitPatternF64 { real, imag }))
+            },
+            0x800E => {
+                let mut value_buf = [0u8; 20];
+                reader.read_exact(&mut value_buf)?;
+                let real = value_buf[0..10].try_into().unwrap();
+                let imag = value_buf[10..20].try_into().unwrap();
+                Ok(Self::Complex80(Complex { real, imag }))
+            },
+            0x800F => {
+                let mut value_buf = [0u8; 32];
+                reader.read_exact(&mut value_buf)?;
+                let real = value_buf[0..16].try_into().unwrap();
+                let imag = value_buf[16..32].try_into().unwrap();
+                Ok(Self::Complex128(Complex { real, imag }))
+            },
+            0x8010 => {
+                let mut length_buf = [0u8; 2];
+                reader.read_exact(&mut length_buf)?;
+                let length = usize::from(u16::from_le_bytes(length_buf));
+                let mut string_buf = vec![0u8; length];
+                reader.read_exact(&mut string_buf)?;
+                Ok(Self::String(DisplayBytesVec::from(string_buf)))
+            },
+            other => {
+                error!("unknown numeric leaf type {:#06X}", other);
+                Err(io::ErrorKind::InvalidData.into())
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct Complex<const BYTES: usize> {
+    #[serde(with = "serde_complex")]
+    pub real: [u8; BYTES],
+
+    #[serde(with = "serde_complex")]
+    pub imag: [u8; BYTES],
+}
+#[cfg(feature = "serde")]
+mod serde_complex {
+    pub fn serialize<S: serde::Serializer, const BYTES: usize>(bytes: &[u8; BYTES], serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::Serialize as _;
+
+        let bytes_vec = bytes.to_vec();
+        bytes_vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'d, D: serde::Deserializer<'d>, const BYTES: usize>(deserializer: D) -> Result<[u8; BYTES], D::Error> {
+        use serde::Deserialize as _;
+        use serde::de::Error as _;
+
+        let bytes_vec: Vec<u8> = Vec::deserialize(deserializer)?;
+        if bytes_vec.len() == BYTES {
+            let mut ret = [0u8; BYTES];
+            ret.copy_from_slice(&bytes_vec);
+            Ok(ret)
+        } else {
+            Err(D::Error::custom("wrong length"))
+        }
     }
 }

@@ -1,3 +1,4 @@
+pub mod bit_pattern_float;
 pub mod bitmap;
 pub mod bitmap_font;
 pub mod code_view;
