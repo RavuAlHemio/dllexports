@@ -3,6 +3,7 @@ pub mod bitmap_font;
 pub mod code_view;
 pub mod ico1;
 pub mod icon_group;
+mod int_from_byte_slice;
 #[macro_use] pub(crate) mod macros;
 pub mod mz;
 pub mod ne;
