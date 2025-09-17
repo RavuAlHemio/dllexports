@@ -76,7 +76,12 @@ impl DebugInfo {
                 SubsectionType::SourceLineModule => todo!(),
                 SubsectionType::Libraries => todo!(),
                 SubsectionType::GlobalSymbols => todo!(),
-                SubsectionType::GlobalPublicSymbols => todo!(),
+                */
+                SubsectionType::GlobalPublicSymbols => {
+                    let content = GlobalPublicSymbolsSubsection::read(&mut data_reader)?;
+                    SubsectionData::GlobalPublicSymbols(content)
+                },
+                /*
                 SubsectionType::GlobalTypes => todo!(),
                 SubsectionType::MakePCode => todo!(),
                 SubsectionType::SegmentMap => todo!(),
@@ -218,7 +223,9 @@ pub enum SubsectionData {
     SourceLineModule(SourceLineModuleSubsection),
     Libraries(LibrariesSubsection),
     GlobalSymbols(GlobalSymbolsSubsection),
+    */
     GlobalPublicSymbols(GlobalPublicSymbolsSubsection),
+    /*
     GlobalTypes(GlobalTypesSubsection),
     MakePCode(MakePCodeSubsection),
     SegmentMap(SegmentMapSubsection),
@@ -379,7 +386,7 @@ impl SymbolsSubsection {
 pub struct SymbolEntry {
     pub length: u16, // length of kind + data!
     pub kind: SymbolEntryType, // u16,
-    pub data: DisplayBytesVec, // [u8; length - size_of(kind)] = [u8; length - 2]
+    pub data: SymbolEntryData, // [u8; length - size_of(kind)] = [u8; length - 2]
 }
 impl SymbolEntry {
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
@@ -397,7 +404,9 @@ impl SymbolEntry {
         let data_length: usize = (length - 2).try_into().unwrap();
         let mut data_vec = vec![0u8; data_length];
         reader.read_exact(&mut data_vec)?;
-        let data = DisplayBytesVec::from(data_vec);
+        let mut data_cursor = Cursor::new(&data_vec);
+
+        let data = SymbolEntryData::read(&mut data_cursor, kind)?;
 
         Ok(Self {
             length,
@@ -448,6 +457,9 @@ pub enum SymbolEntryType {
     GlobalProcedure16_32 = 0x0205,
     Thunk16_32 = 0x0206,
     Block16_32 = 0x0207,
+    With16_32 = 0x0208,
+    Label16_32 = 0x0209,
+    ChangeExecutionModel16_32 = 0x020A,
     VirtualFunctionTablePath16_32 = 0x020B,
     RegisterRelativeOffset16_32 = 0x020C,
     LocalThreadData16_32 = 0x020D,
@@ -503,6 +515,9 @@ pub enum SymbolEntryData {
     GlobalProcedure16_32(ProcedureStart16<u32>),
     Thunk16_32(Thunk16<u32>),
     Block16_32(BlockStart16<u32>),
+    With16_32(BlockStart16<u32>),
+    Label16_32(Label16<u32>),
+    ChangeExecutionModel16_32(ChangeExecutionModel16<u32>),
     VirtualFunctionTablePath16_32(VirtualFunctionTablePath16<u32>),
     RegisterRelativeOffset16_32(RegisterRelativeOffset16<u32>),
     LocalThreadData16_32(ThreadData16_32),
@@ -516,6 +531,202 @@ pub enum SymbolEntryData {
     PageAlignment(PageAlignment),
 
     Other(DisplayBytesVec),
+}
+impl SymbolEntryData {
+    pub fn read<R: Read + Seek>(reader: &mut R, kind: SymbolEntryType) -> Result<Self, io::Error> {
+        match kind {
+            SymbolEntryType::CompileFlags => {
+                let data = CompileFlags::read(reader)?;
+                Ok(Self::CompileFlags(data))
+            },
+            SymbolEntryType::RegisterVariable => {
+                let data = RegisterVariable::read(reader)?;
+                Ok(Self::RegisterVariable(data))
+            },
+            SymbolEntryType::Constant => {
+                let data = Constant::read(reader)?;
+                Ok(Self::Constant(data))
+            },
+            SymbolEntryType::UserDefinedType => {
+                let data = UserDefinedType::read(reader)?;
+                Ok(Self::UserDefinedType(data))
+            },
+            SymbolEntryType::StartSearch => {
+                let data = StartSearch::read(reader)?;
+                Ok(Self::StartSearch(data))
+            },
+            SymbolEntryType::End => Ok(Self::End),
+            SymbolEntryType::Skip => {
+                let data = Skip::read(reader)?;
+                Ok(Self::Skip(data))
+            },
+            SymbolEntryType::CodeViewReserved => {
+                let mut buf_vec = Vec::new();
+                reader.read_to_end(&mut buf_vec)?;
+                let buf = DisplayBytesVec::from(buf_vec);
+                Ok(Self::CodeViewReserved(buf))
+            },
+            SymbolEntryType::ObjectName => {
+                let data = ObjectName::read(reader)?;
+                Ok(Self::ObjectName(data))
+            },
+            SymbolEntryType::EndArguments => Ok(Self::EndArguments),
+            SymbolEntryType::MicrofocusCobolUserDefinedType => {
+                let data = UserDefinedType::read(reader)?;
+                Ok(Self::MicrofocusCobolUserDefinedType(data))
+            },
+            SymbolEntryType::ManyRegisters => {
+                let data = ManyRegisters::read(reader)?;
+                Ok(Self::ManyRegisters(data))
+            },
+            SymbolEntryType::ReturnDescription => {
+                let data = ReturnDescription::read(reader)?;
+                Ok(Self::ReturnDescription(data))
+            },
+            SymbolEntryType::EntryThisPointer => {
+                let data = EntryThisPointer::read(reader)?;
+                Ok(Self::EntryThisPointer(data))
+            },
+            SymbolEntryType::BpRelative16_16 => {
+                let data = BpRelative16::read(reader)?;
+                Ok(Self::BpRelative16_16(data))
+            },
+            SymbolEntryType::LocalData16_16 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::LocalData16_16(data))
+            },
+            SymbolEntryType::GlobalData16_16 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::GlobalData16_16(data))
+            },
+            SymbolEntryType::PublicSymbol16_16 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::PublicSymbol16_16(data))
+            },
+            SymbolEntryType::LocalProcedure16_16 => {
+                let data = ProcedureStart16::read(reader)?;
+                Ok(Self::LocalProcedure16_16(data))
+            },
+            SymbolEntryType::GlobalProcedure16_16 => {
+                let data = ProcedureStart16::read(reader)?;
+                Ok(Self::GlobalProcedure16_16(data))
+            },
+            SymbolEntryType::Thunk16_16 => {
+                let data = Thunk16::read(reader)?;
+                Ok(Self::Thunk16_16(data))
+            },
+            SymbolEntryType::Block16_16 => {
+                let data = BlockStart16::read(reader)?;
+                Ok(Self::Block16_16(data))
+            },
+            SymbolEntryType::With16_16 => {
+                let data = BlockStart16::read(reader)?;
+                Ok(Self::With16_16(data))
+            },
+            SymbolEntryType::Label16_16 => {
+                let data = Label16::read(reader)?;
+                Ok(Self::Label16_16(data))
+            },
+            SymbolEntryType::ChangeExecutionModel16_16 => {
+                let data = ChangeExecutionModel16::read(reader)?;
+                Ok(Self::ChangeExecutionModel16_16(data))
+            },
+            SymbolEntryType::VirtualFunctionTablePath16_16 => {
+                let data = VirtualFunctionTablePath16::read(reader)?;
+                Ok(Self::VirtualFunctionTablePath16_16(data))
+            },
+            SymbolEntryType::RegisterRelativeOffset16_16 => {
+                let data = RegisterRelativeOffset16::read(reader)?;
+                Ok(Self::RegisterRelativeOffset16_16(data))
+            },
+            SymbolEntryType::BpRelative16_32 => {
+                let data = BpRelative16::read(reader)?;
+                Ok(Self::BpRelative16_32(data))
+            },
+            SymbolEntryType::LocalData16_32 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::LocalData16_32(data))
+            },
+            SymbolEntryType::GlobalData16_32 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::GlobalData16_32(data))
+            },
+            SymbolEntryType::PublicSymbol16_32 => {
+                let data = Data16::read(reader)?;
+                Ok(Self::PublicSymbol16_32(data))
+            },
+            SymbolEntryType::LocalProcedure16_32 => {
+                let data = ProcedureStart16::read(reader)?;
+                Ok(Self::LocalProcedure16_32(data))
+            },
+            SymbolEntryType::GlobalProcedure16_32 => {
+                let data = ProcedureStart16::read(reader)?;
+                Ok(Self::GlobalProcedure16_32(data))
+            },
+            SymbolEntryType::Thunk16_32 => {
+                let data = Thunk16::read(reader)?;
+                Ok(Self::Thunk16_32(data))
+            },
+            SymbolEntryType::Block16_32 => {
+                let data = BlockStart16::read(reader)?;
+                Ok(Self::Block16_32(data))
+            },
+            SymbolEntryType::With16_32 => {
+                let data = BlockStart16::read(reader)?;
+                Ok(Self::With16_32(data))
+            },
+            SymbolEntryType::Label16_32 => {
+                let data = Label16::read(reader)?;
+                Ok(Self::Label16_32(data))
+            },
+            SymbolEntryType::ChangeExecutionModel16_32 => {
+                let data = ChangeExecutionModel16::read(reader)?;
+                Ok(Self::ChangeExecutionModel16_32(data))
+            },
+            SymbolEntryType::VirtualFunctionTablePath16_32 => {
+                let data = VirtualFunctionTablePath16::read(reader)?;
+                Ok(Self::VirtualFunctionTablePath16_32(data))
+            },
+            SymbolEntryType::RegisterRelativeOffset16_32 => {
+                let data = RegisterRelativeOffset16::read(reader)?;
+                Ok(Self::RegisterRelativeOffset16_32(data))
+            },
+            SymbolEntryType::LocalThreadData16_32 => {
+                let data = ThreadData16_32::read(reader)?;
+                Ok(Self::LocalThreadData16_32(data))
+            },
+            SymbolEntryType::GlobalThreadData16_32 => {
+                let data = ThreadData16_32::read(reader)?;
+                Ok(Self::GlobalThreadData16_32(data))
+            },
+            SymbolEntryType::LocalProcedureMips => {
+                let data = ProcedureMips::read(reader)?;
+                Ok(Self::LocalProcedureMips(data))
+            },
+            SymbolEntryType::GlobalProcedureMips => {
+                let data = ProcedureMips::read(reader)?;
+                Ok(Self::GlobalProcedureMips(data))
+            },
+            SymbolEntryType::ProcedureReference => {
+                let data = CodeViewPackReference::read(reader)?;
+                Ok(Self::ProcedureReference(data))
+            },
+            SymbolEntryType::DataReference => {
+                let data = CodeViewPackReference::read(reader)?;
+                Ok(Self::DataReference(data))
+            },
+            SymbolEntryType::PageAlignment => {
+                let data = PageAlignment::read(reader)?;
+                Ok(Self::PageAlignment(data))
+            },
+            SymbolEntryType::Other(_) => {
+                let mut buf_vec = Vec::new();
+                reader.read_to_end(&mut buf_vec)?;
+                let buf = DisplayBytesVec::from(buf_vec);
+                Ok(Self::Other(buf))
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1401,6 +1612,93 @@ impl PageAlignment {
 
         Ok(Self {
             padding,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct GlobalPublicSymbolsSubsection {
+    pub symbol_hash_function_index: u16,
+    pub address_hash_function_index: u16,
+    pub symbols_length: u32,
+    pub symbol_hash_table_length: u32,
+    pub address_hash_table_length: u32,
+    pub symbols: Vec<SymbolEntry>, // until symbols_length bytes have been read
+    pub symbol_hash_table: DisplayBytesVec, // [u8; symbol_hash_table_length]
+    pub address_hash_table: DisplayBytesVec, // [u8; address_hash_table_length]
+}
+impl GlobalPublicSymbolsSubsection {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 16];
+        reader.read_exact(&mut header_buf)?;
+
+        let symbol_hash_function_index = u16::from_le_byte_slice(&header_buf[0..2]);
+        let address_hash_function_index = u16::from_le_byte_slice(&header_buf[2..4]);
+        let symbols_length = u32::from_le_byte_slice(&header_buf[4..8]);
+        let symbol_hash_table_length = u32::from_le_byte_slice(&header_buf[8..12]);
+        let address_hash_table_length = u32::from_le_byte_slice(&header_buf[12..16]);
+
+        let mut symbol_bytes = vec![0u8; symbols_length.try_into().unwrap()];
+        reader.read_exact(&mut symbol_bytes)?;
+        let mut symbol_hash_table_vec = vec![0u8; symbol_hash_table_length.try_into().unwrap()];
+        reader.read_exact(&mut symbol_hash_table_vec)?;
+        let mut address_hash_table_vec = vec![0u8; address_hash_table_length.try_into().unwrap()];
+        reader.read_exact(&mut address_hash_table_vec)?;
+
+        let symbol_hash_table = DisplayBytesVec::from(symbol_hash_table_vec);
+        let address_hash_table = DisplayBytesVec::from(address_hash_table_vec);
+
+        let mut symbol_reader = Cursor::new(&symbol_bytes);
+
+        let mut symbols = Vec::new();
+        loop {
+            // try reading a length byte
+            let mut buf = [0u8];
+            match symbol_reader.read(&mut buf) {
+                Ok(0) => {
+                    // end of data, no more entries
+                    break;
+                },
+                Ok(1) => {
+                    // that works, keep going
+                },
+                Ok(n) => {
+                    unreachable!("read() read {} bytes even though the buffer only has space for {}?!", n, buf.len());
+                },
+                Err(e) => return Err(e),
+            }
+
+            // read another length byte and fail if that doesn't work
+            let mut buf2 = [0u8];
+            symbol_reader.read_exact(&mut buf2)?;
+
+            // read as much data as the length indicates
+            let length_u16 =
+                (u16::from(buf[0]) << 0)
+                | (u16::from(buf2[0]) << 8)
+                ;
+            let length = usize::from(length_u16);
+            let mut data = vec![0u8; length+2];
+            data[0] = buf[0];
+            data[1] = buf2[0];
+            symbol_reader.read_exact(&mut data[2..])?;
+            let mut data_cursor = Cursor::new(&data);
+
+            // parse it as a symbol
+            let symbol = SymbolEntry::read(&mut data_cursor)?;
+            symbols.push(symbol);
+        }
+
+        Ok(Self {
+            symbol_hash_function_index,
+            address_hash_function_index,
+            symbols_length,
+            symbol_hash_table_length,
+            address_hash_table_length,
+            symbols,
+            symbol_hash_table,
+            address_hash_table,
         })
     }
 }
