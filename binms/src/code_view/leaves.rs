@@ -1,14 +1,14 @@
 //! Numeric and type leaves in the CodeView debugging format.
 
 
-use std::io::{self, Read, Seek};
+use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
 use display_bytes::DisplayBytesVec;
 use from_to_repr::{from_to_other, FromToRepr};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, error, instrument};
 
 use crate::bit_pattern_float::{
     BitPatternF32, BitPatternF64, ComplexBitPatternF32, ComplexBitPatternF64,
@@ -190,6 +190,7 @@ mod serde_complex {
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[from_to_other(base_type = u16, derive_compare = "as_int")]
 pub enum TypeLeafIndex {
+    // 0x0000..=0x01FF: type records that can be referenced from symbols
     Modifier = 0x0001,
     Pointer = 0x0002,
     Array = 0x0003,
@@ -212,6 +213,7 @@ pub enum TypeLeafIndex {
     PrecompiledTypesEnd = 0x0014,
     OemGenericType = 0x0015,
 
+    // 0x0200..=0x03FF: type records that can be referenced from other type records
     Skip = 0x0200,
     ArgumentList = 0x0201,
     DefaultArgument = 0x0202,
@@ -226,6 +228,7 @@ pub enum TypeLeafIndex {
     DimensionedArrayVariableLowerVariableUpper = 0x020B,
     ReferencedSymbol = 0x020C,
 
+    // 0x0400..=0x05FF: type records for fields of complex lists
     RealBaseClass = 0x0400,
     DirectVirtualBaseClass = 0x0401,
     IndirectVirtualBaseClass = 0x0402,
@@ -253,9 +256,7 @@ pub enum TypeLeaf {
     Class(StructureTypeLeaf),
     Structure(StructureTypeLeaf),
     Union(UnionTypeLeaf),
-    /*
     Enum(EnumTypeLeaf),
-    */
     Procedure(ProcedureTypeLeaf),
     MemberFunction(MemberFunctionTypeLeaf),
     VirtualFunctionTableShape(VirtualFunctionTableShapeTypeLeaf),
@@ -278,40 +279,53 @@ pub enum TypeLeaf {
     /*
     DefaultArgument(DefaultArgumentTypeLeaf),
     List(ListTypeLeaf),
+    */
     FieldList(FieldListTypeLeaf),
     DerivedClasses(DerivedClassesTypeLeaf),
     BitFields(BitFieldsTypeLeaf),
     MethodList(MethodListTypeLeaf),
+    /*
     DimensionedArrayDefaultLowerConstantUpper(DimensionedArrayDefaultLowerConstantUpperTypeLeaf),
     DimensionedArrayConstantLowerConstantUpper(DimensionedArrayConstantLowerConstantUpperTypeLeaf),
     DimensionedArrayDefaultLowerVariableUpper(DimensionedArrayDefaultLowerVariableUpperTypeLeaf),
     DimensionedArrayVariableLowerVariableUpper(DimensionedArrayVariableLowerVariableUpperTypeLeaf),
     ReferencedSymbol(ReferencedSymbolTypeLeaf),
+    */
 
     RealBaseClass(RealBaseClassTypeLeaf),
+    /*
     DirectVirtualBaseClass(DirectVirtualBaseClassTypeLeaf),
     IndirectVirtualBaseClass(IndirectVirtualBaseClassTypeLeaf),
+    */
     EnumerationNameAndValue(EnumerationNameAndValueTypeLeaf),
+    /*
     FriendFunction(FriendFunctionTypeLeaf),
     IndexToAnotherTypeRecord(IndexToAnotherTypeRecordTypeLeaf),
+    */
     DataMember(DataMemberTypeLeaf),
     StaticDataMember(StaticDataMemberTypeLeaf),
     Method(MethodTypeLeaf),
     NestedTypeDefinition(NestedTypeDefinitionTypeLeaf),
     VirtualFunctionTablePointer(VirtualFunctionTablePointerTypeLeaf),
+    /*
     FriendClass(FriendClassTypeLeaf),
+    */
     OneMethod(OneMethodTypeLeaf),
+    /*
     VirtualFunctionOffset(VirtualFunctionOffsetTypeLeaf),
     */
 
     Other { index: u16, data: DisplayBytesVec },
 }
 impl TypeLeaf {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut index_buf = [0u8; 2];
         reader.read_exact(&mut index_buf)?;
         let index_u16 = u16::from_le_bytes(index_buf);
         let index = TypeLeafIndex::from_base_type(index_u16);
+
+        debug!("type leaf index: {:?}", index);
 
         match index {
             TypeLeafIndex::Modifier => {
@@ -338,6 +352,10 @@ impl TypeLeaf {
                 let content = UnionTypeLeaf::read(reader)?;
                 Ok(Self::Union(content))
             },
+            TypeLeafIndex::Enum => {
+                let content = EnumTypeLeaf::read(reader)?;
+                Ok(Self::Enum(content))
+            },
             TypeLeafIndex::Procedure => {
                 let content = ProcedureTypeLeaf::read(reader)?;
                 Ok(Self::Procedure(content))
@@ -353,6 +371,54 @@ impl TypeLeaf {
             TypeLeafIndex::ArgumentList => {
                 let content = ArgumentListTypeLeaf::read(reader)?;
                 Ok(Self::ArgumentList(content))
+            },
+            TypeLeafIndex::FieldList => {
+                let content = FieldListTypeLeaf::read(reader)?;
+                Ok(Self::FieldList(content))
+            },
+            TypeLeafIndex::DerivedClasses => {
+                let content = DerivedClassesTypeLeaf::read(reader)?;
+                Ok(Self::DerivedClasses(content))
+            },
+            TypeLeafIndex::BitFields => {
+                let content = BitFieldsTypeLeaf::read(reader)?;
+                Ok(Self::BitFields(content))
+            },
+            TypeLeafIndex::MethodList => {
+                let content = MethodListTypeLeaf::read(reader)?;
+                Ok(Self::MethodList(content))
+            },
+            TypeLeafIndex::RealBaseClass => {
+                let content = RealBaseClassTypeLeaf::read(reader)?;
+                Ok(Self::RealBaseClass(content))
+            },
+            TypeLeafIndex::EnumerationNameAndValue => {
+                let content = EnumerationNameAndValueTypeLeaf::read(reader)?;
+                Ok(Self::EnumerationNameAndValue(content))
+            },
+            TypeLeafIndex::DataMember => {
+                let content = DataMemberTypeLeaf::read(reader)?;
+                Ok(Self::DataMember(content))
+            },
+            TypeLeafIndex::StaticDataMember => {
+                let content = StaticDataMemberTypeLeaf::read(reader)?;
+                Ok(Self::StaticDataMember(content))
+            },
+            TypeLeafIndex::Method => {
+                let content = MethodTypeLeaf::read(reader)?;
+                Ok(Self::Method(content))
+            },
+            TypeLeafIndex::NestedTypeDefinition => {
+                let content = NestedTypeDefinitionTypeLeaf::read(reader)?;
+                Ok(Self::NestedTypeDefinition(content))
+            },
+            TypeLeafIndex::VirtualFunctionTablePointer => {
+                let content = VirtualFunctionTablePointerTypeLeaf::read(reader)?;
+                Ok(Self::VirtualFunctionTablePointer(content))
+            },
+            TypeLeafIndex::OneMethod => {
+                let content = OneMethodTypeLeaf::read(reader)?;
+                Ok(Self::OneMethod(content))
             },
             other => {
                 let other_u16 = other.to_base_type();
@@ -422,6 +488,25 @@ pub enum MethodProperty {
     PureVirtual = 5,
     PureIntroducingVirtual = 6,
     Reserved = 7,
+}
+impl MethodProperty {
+    pub fn is_virtual(&self) -> bool {
+        match self {
+            Self::Vanilla|Self::Static|Self::Friend|Self::Reserved
+                => false,
+            Self::Virtual|Self::IntroducingVirtual|Self::PureVirtual|Self::PureIntroducingVirtual
+                => true,
+        }
+    }
+
+    pub fn is_introducing_virtual(&self) -> bool {
+        match self {
+            Self::Vanilla|Self::Static|Self::Friend|Self::Reserved|Self::Virtual|Self::PureVirtual
+                => false,
+            Self::IntroducingVirtual|Self::PureIntroducingVirtual
+                => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -753,6 +838,41 @@ impl UnionTypeLeaf {
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct EnumTypeLeaf {
+    pub option_count: u16,
+    pub underlying_type_index: u16,
+    pub field_list_type_index: u16,
+    pub member_attributes: MemberAttributes,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl EnumTypeLeaf {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 8];
+        reader.read_exact(&mut buf)?;
+
+        let option_count = u16::from_le_byte_slice(&buf[0..2]);
+        let underlying_type_index = u16::from_le_byte_slice(&buf[2..4]);
+        let field_list_type_index = u16::from_le_byte_slice(&buf[4..6]);
+        let member_attributes_u16 = u16::from_le_byte_slice(&buf[6..8]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+
+        Ok(Self {
+            option_count,
+            underlying_type_index,
+            field_list_type_index,
+            member_attributes,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct ProcedureTypeLeaf {
     pub return_value_type_index: u16,
     pub calling_convention: CallingConvention, // u8
@@ -920,6 +1040,423 @@ impl ArgumentListTypeLeaf {
         Ok(Self {
             argument_count,
             argument_type_indexes,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct FieldListTypeLeaf {
+    pub fields: Vec<TypeLeaf>,
+}
+impl FieldListTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut fields = Vec::new();
+
+        loop {
+            // is there a field?
+            let mut before_field_buf = [0u8];
+            match reader.read(&mut before_field_buf)? {
+                0 => {
+                    // nope
+                    break;
+                },
+                1 => {
+                    // yep; take a step back and read it
+                    reader.seek(SeekFrom::Current(-1))?;
+                },
+                other  => unreachable!("read {} bytes into a buffer 1 byte long", other),
+            }
+
+            // read a field
+            let field = TypeLeaf::read(reader)?;
+            fields.push(field);
+
+            // is it followed by padding?
+            let mut possible_padding_buf = [0u8; 1];
+            match reader.read(&mut possible_padding_buf)? {
+                0 => {
+                    // EOF, even better
+                    break;
+                },
+                1 => {
+                    // is it padding?
+                    if possible_padding_buf[0] > 0xF0 {
+                        // yes; munch n-1 bytes (since we already ate the first one)
+                        let padding_bytes = usize::from(possible_padding_buf[0] & 0x0F) - 1;
+                        if padding_bytes > 0 {
+                            let mut padding_buf = vec![0u8; padding_bytes];
+                            reader.read_exact(&mut padding_buf)?;
+                        }
+                    } else {
+                        // it's another field; go back and read from there
+                        reader.seek(SeekFrom::Current(-1))?;
+                    }
+                },
+                other => unreachable!("read {} bytes into a buffer 1 byte long", other),
+            }
+        }
+
+        Ok(Self {
+            fields,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct DerivedClassesTypeLeaf {
+    pub derived_class_count: u16,
+    pub derived_class_type_record_indices: Vec<u16>, // [u16; derived_class_count]
+}
+impl DerivedClassesTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 2];
+        reader.read_exact(&mut header_buf)?;
+        let derived_class_count = u16::from_le_bytes(header_buf);
+
+        let derived_class_count_usize = usize::from(derived_class_count);
+        let mut derived_class_buf = vec![0u8; 2*derived_class_count_usize];
+        reader.read_exact(&mut derived_class_buf)?;
+        let derived_class_type_record_indices: Vec<u16> = derived_class_buf
+            .chunks(2)
+            .map(|chunk| u16::from_le_byte_slice(chunk))
+            .collect();
+
+        Ok(Self {
+            derived_class_count,
+            derived_class_type_record_indices,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct BitFieldsTypeLeaf {
+    pub bit_count: u8,
+    pub position: u8,
+    pub type_record_index: u16,
+}
+impl BitFieldsTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 4];
+        reader.read_exact(&mut buf)?;
+        let bit_count = buf[0];
+        let position = buf[1];
+        let type_record_index = u16::from_le_byte_slice(&buf[2..4]);
+
+        Ok(Self {
+            bit_count,
+            position,
+            type_record_index,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct MethodListTypeLeaf {
+    pub methods: Vec<MethodListEntry>, // repeated until buffer is exhausted
+}
+impl MethodListTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut methods = Vec::new();
+        loop {
+            // any more entries?
+            let mut test_buf = [0u8];
+            match reader.read(&mut test_buf)? {
+                0 => {
+                    // no
+                    break;
+                },
+                1 => {
+                    // yes
+                    // keep going
+                },
+                other => unreachable!("read {} bytes into 1-byte buffer?!", other),
+            }
+
+            // rewind
+            reader.seek(SeekFrom::Current(-1))?;
+
+            // read
+            let method = MethodListEntry::read(reader)?;
+            methods.push(method);
+        }
+
+        Ok(Self {
+            methods,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct MethodListEntry {
+    pub member_attributes: MemberAttributes, // u16
+    pub type_record_index: u16,
+    pub virtual_function_table_offset: Option<u32>,
+}
+impl MethodListEntry {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let member_attributes_u16 = u16::from_le_byte_slice(&header_buf[0..2]);
+        let type_record_index = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+
+        let virtual_function_table_offset = if member_attributes.method_property.is_introducing_virtual() {
+            let mut vfto_buf = [0u8; 4];
+            reader.read_exact(&mut vfto_buf)?;
+            Some(u32::from_le_bytes(vfto_buf))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            member_attributes,
+            type_record_index,
+            virtual_function_table_offset,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct RealBaseClassTypeLeaf {
+    pub type_record_index: u16,
+    pub member_attributes: MemberAttributes, // u16
+    pub offset: NumericLeaf,
+}
+impl RealBaseClassTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let type_record_index = u16::from_le_byte_slice(&header_buf[0..2]);
+        let member_attributes_u16 = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+        debug!("tri: {}, ma: {:?}", type_record_index, member_attributes);
+
+        let offset = NumericLeaf::read(reader)?;
+        debug!("data member offset: {:?}", offset);
+
+        Ok(Self {
+            type_record_index,
+            member_attributes,
+            offset,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct EnumerationNameAndValueTypeLeaf {
+    pub member_attributes: MemberAttributes, // u16
+    pub value: NumericLeaf,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl EnumerationNameAndValueTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut attributes_buf = [0u8; 2];
+        reader.read_exact(&mut attributes_buf)?;
+        let member_attributes_u16 = u16::from_le_bytes(attributes_buf);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+
+        let value = NumericLeaf::read(reader)?;
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+
+        Ok(Self {
+            member_attributes,
+            value,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct DataMemberTypeLeaf {
+    pub type_record_index: u16,
+    pub member_attributes: MemberAttributes, // u16
+    pub offset: NumericLeaf,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl DataMemberTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let type_record_index = u16::from_le_byte_slice(&header_buf[0..2]);
+        let member_attributes_u16 = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+
+        let offset = NumericLeaf::read(reader)?;
+        debug!("data member offset: {:?}", offset);
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+        debug!("data member name: {}", name);
+
+        Ok(Self {
+            type_record_index,
+            member_attributes,
+            offset,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct StaticDataMemberTypeLeaf {
+    pub type_record_index: u16,
+    pub member_attributes: MemberAttributes, // u16
+    pub name: DisplayBytesVec, // PascalString
+}
+impl StaticDataMemberTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let type_record_index = u16::from_le_byte_slice(&header_buf[0..2]);
+        let member_attributes_u16 = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+        debug!("data member name: {}", name);
+
+        Ok(Self {
+            type_record_index,
+            member_attributes,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct MethodTypeLeaf {
+    pub overload_count: u16, // I think?
+    pub method_list_type_index: u16,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl MethodTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let overload_count = u16::from_le_byte_slice(&header_buf[0..2]);
+        let method_list_type_index = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+
+        Ok(Self {
+            overload_count,
+            method_list_type_index,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct NestedTypeDefinitionTypeLeaf {
+    pub nested_type_record_index: u16,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl NestedTypeDefinitionTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 2];
+        reader.read_exact(&mut buf)?;
+        let nested_type_record_index = u16::from_le_bytes(buf);
+
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+
+        Ok(Self {
+            nested_type_record_index,
+            name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct VirtualFunctionTablePointerTypeLeaf {
+    pub pointer_type_record_index: u16,
+}
+impl VirtualFunctionTablePointerTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut buf = [0u8; 2];
+        reader.read_exact(&mut buf)?;
+        let pointer_type_record_index = u16::from_le_bytes(buf);
+
+        Ok(Self {
+            pointer_type_record_index,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct OneMethodTypeLeaf {
+    pub member_attributes: MemberAttributes,
+    pub type_record_index: u16,
+    pub virtual_function_table_offset: Option<u32>,
+    pub name: DisplayBytesVec, // PascalString
+}
+impl OneMethodTypeLeaf {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+        let member_attributes_u16 = u16::from_le_byte_slice(&header_buf[0..2]);
+        let type_record_index = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let member_attributes = MemberAttributes::from_u16(member_attributes_u16);
+        debug!("one-method member attributes: {:?}", member_attributes);
+
+        // documentation says this field is present if the method "is virtual"
+        // apparently, this field is only present if the method "is introducing virtual"
+        let virtual_function_table_offset = if member_attributes.method_property.is_introducing_virtual() {
+            let mut vfto_buf = [0u8; 4];
+            reader.read_exact(&mut vfto_buf)?;
+            Some(u32::from_le_bytes(vfto_buf))
+        } else {
+            None
+        };
+
+        let name_vec = read_pascal_byte_string(reader)?;
+
+        let name = DisplayBytesVec::from(name_vec);
+        debug!("data member name: {}", name);
+
+        Ok(Self {
+            type_record_index,
+            member_attributes,
+            virtual_function_table_offset,
+            name,
         })
     }
 }

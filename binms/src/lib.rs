@@ -15,7 +15,7 @@ pub mod pe;
 
 use std::io::{self, Read};
 
-use tracing::debug;
+use tracing::{debug, instrument};
 
 
 pub(crate) fn read_nul_terminated_ascii_string<R: Read>(reader: &mut R) -> Result<String, io::Error> {
@@ -64,9 +64,11 @@ pub(crate) fn read_pascal_utf16le_string<R: Read>(reader: &mut R) -> Result<Stri
 }
 
 /// Reads a byte string that is prefixed by a u8 length.
+#[instrument(skip_all)]
 pub(crate) fn read_pascal_byte_string<R: Read>(reader: &mut R) -> Result<Vec<u8>, io::Error> {
     let mut length_buf = [0u8; 1];
     reader.read_exact(&mut length_buf)?;
+    debug!("Pascal string length: {}", length_buf[0]);
 
     let mut string_bytes = vec![0u8; usize::from(length_buf[0])];
     reader.read_exact(&mut string_bytes)?;

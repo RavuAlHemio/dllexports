@@ -879,7 +879,7 @@ bitflags! {
 pub struct Thunk16<T: IntFromByteSlice> {
     pub parent_scope: u32,
     pub scope_end: u32,
-    pub next_scope: u32, // T or always u32?
+    pub next_scope: u32, // documentation says T, but it's always u32?
     pub offset: T,
     pub segment: u16,
     pub length: u16,

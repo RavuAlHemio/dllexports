@@ -10,11 +10,11 @@ pub mod symbol_entries;
 
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
-use display_bytes::DisplayBytesVec;
+use display_bytes::{DisplayBytesSlice, DisplayBytesVec};
 use from_to_repr::from_to_other;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 use crate::read_pascal_byte_string;
 use crate::code_view::leaves::TypeLeaf;
@@ -31,6 +31,7 @@ pub struct DebugInfo {
     pub subsection_directory_entries: Vec<SubsectionDirectoryEntry>, // [SubsectionDirectoryEntry; subsection_directory_header.entry_count]
 }
 impl DebugInfo {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 8];
         reader.read_exact(&mut header_buf)?;
@@ -140,6 +141,7 @@ pub struct SubsectionDirectoryHeader {
     pub flags: u32,
 }
 impl SubsectionDirectoryHeader {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 16];
         reader.read_exact(&mut header_buf)?;
@@ -179,6 +181,7 @@ pub struct SubsectionDirectoryEntryMetadata {
     pub size_bytes: u32,
 }
 impl SubsectionDirectoryEntryMetadata {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 12];
         reader.read_exact(&mut header_buf)?;
@@ -268,6 +271,7 @@ pub struct ModuleSubsection {
     pub name: DisplayBytesVec, // PascalString
 }
 impl ModuleSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 8];
         reader.read_exact(&mut header_buf)?;
@@ -330,6 +334,7 @@ pub struct TypesSubsection {
     pub data: DisplayBytesVec,
 }
 impl TypesSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
@@ -346,6 +351,7 @@ pub struct SymbolsSubsection {
     pub symbols: Vec<SymbolEntry>,
 }
 impl SymbolsSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut signature_buf = [0u8; 4];
         reader.read_exact(&mut signature_buf)?;
@@ -413,6 +419,7 @@ pub struct SourceLineModuleSubsection {
     pub source_files: Vec<SourceLineFile>, // [SourceLineFile; source_file_count]
 }
 impl SourceLineModuleSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 4];
         reader.read_exact(&mut header_buf)?;
@@ -485,6 +492,7 @@ pub struct SourceLineFile {
     pub segments: Vec<SourceLineSegment>, // [SourceLineSegment; segment_count]
 }
 impl SourceLineFile {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 4];
         reader.read_exact(&mut header_buf)?;
@@ -563,6 +571,7 @@ pub struct SourceLineSegment {
     pub padding: Option<u16>, // if line_pair_count % 2 == 1
 }
 impl SourceLineSegment {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 4];
         reader.read_exact(&mut header_buf)?;
@@ -609,6 +618,7 @@ pub struct LibrariesSubsection {
     pub libraries: Vec<DisplayBytesVec>,
 }
 impl LibrariesSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut libraries = Vec::new();
 
@@ -652,6 +662,7 @@ pub struct GlobalSymbolsSubsection {
     pub address_hash_table: DisplayBytesVec, // [u8; address_hash_table_length]
 }
 impl GlobalSymbolsSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 16];
         reader.read_exact(&mut header_buf)?;
@@ -735,6 +746,7 @@ pub struct GlobalTypesSubsection {
     pub type_leaves: Vec<TypeLeaf>, // [TypeLeaf; type_count], each starting at corresponding entry of type_offsets
 }
 impl GlobalTypesSubsection {
+    #[instrument(skip_all)]
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
         let mut header_buf = [0u8; 8];
         reader.read_exact(&mut header_buf)?;
@@ -765,6 +777,7 @@ impl GlobalTypesSubsection {
             let mut type_leaf_buf = vec![0u8; length];
             reader.read_exact(&mut type_leaf_buf)?;
 
+            debug!("type leaf data: {}", DisplayBytesSlice::from(type_leaf_buf.as_slice()));
             let mut type_leaf_reader = Cursor::new(&type_leaf_buf);
             let type_leaf = TypeLeaf::read(&mut type_leaf_reader)?;
             type_leaves.push(type_leaf);
