@@ -168,8 +168,8 @@ impl SubsectionDirectoryHeader {
         }
 
         let entry_count = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
-        let next_directory_offset = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
-        let flags = u32::from_le_bytes(header_buf[4..8].try_into().unwrap());
+        let next_directory_offset = u32::from_le_bytes(header_buf[8..12].try_into().unwrap());
+        let flags = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
 
         Ok(Self {
             header_length,
