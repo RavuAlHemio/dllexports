@@ -10,6 +10,7 @@ pub mod symbol_entries;
 
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
+use bitflags::bitflags;
 use display_bytes::{DisplayBytesSlice, DisplayBytesVec};
 use from_to_repr::from_to_other;
 #[cfg(feature = "serde")]
@@ -102,11 +103,19 @@ impl DebugInfo {
                 },
                 /*
                 SubsectionType::MakePCode => todo!(),
-                SubsectionType::SegmentMap => todo!(),
+                */
+                SubsectionType::SegmentMap => {
+                    let content = SegmentMapSubsection::read(&mut data_reader)?;
+                    SubsectionData::SegmentMap(content)
+                },
+                /*
                 SubsectionType::SegmentName => todo!(),
                 SubsectionType::PreCompile => todo!(),
-                SubsectionType::FileIndex => todo!(),
                 */
+                SubsectionType::FileIndex => {
+                    let content = FileIndexSubsection::read(&mut data_reader)?;
+                    SubsectionData::FileIndex(content)
+                },
                 SubsectionType::StaticSymbols => {
                     // very much not global symbols, but the same structure
                     let content = GlobalSymbolsSubsection::read(&mut data_reader)?;
@@ -251,12 +260,14 @@ pub enum SubsectionData {
     GlobalTypes(GlobalTypesSubsection),
     /*
     MakePCode(MakePCodeSubsection),
+    */
     SegmentMap(SegmentMapSubsection),
+    /*
     SegmentName(SegmentNameSubsection),
     PreCompile(PreCompileSubsection),
-    FileIndex(FileIndexSubsection),
-    StaticSymbols(StaticSymbolsSubsection),
     */
+    FileIndex(FileIndexSubsection),
+    StaticSymbols(GlobalSymbolsSubsection),
     Other(DisplayBytesVec),
 }
 
@@ -788,6 +799,170 @@ impl GlobalTypesSubsection {
             type_count,
             type_offsets,
             type_leaves,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct SegmentMapSubsection {
+    pub descriptor_count: u16,
+    pub logical_descriptor_count: u16,
+    pub logical_segment_descriptors: Vec<SegmentDescriptor>, // [SegmentDescriptor; logical_descriptor_count]
+    pub group_descriptors: Vec<SegmentDescriptor>, // [SegmentDescriptor; descriptor_count - logical_descriptor_count]
+}
+impl SegmentMapSubsection {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+
+        let descriptor_count = u16::from_le_byte_slice(&header_buf[0..2]);
+        let logical_descriptor_count = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let descriptor_count_usize = usize::from(descriptor_count);
+        let logical_descriptor_count_usize = usize::from(logical_descriptor_count);
+
+        let mut descriptor_buf = vec![0u8; 20*descriptor_count_usize];
+        reader.read_exact(&mut descriptor_buf)?;
+        let logical_segment_descriptors: Vec<SegmentDescriptor> = descriptor_buf
+            .chunks(20)
+            .take(logical_descriptor_count_usize)
+            .map(|chunk| SegmentDescriptor::from_byte_slice(chunk))
+            .collect();
+        let group_descriptors: Vec<SegmentDescriptor> = descriptor_buf
+            .chunks(20)
+            .skip(logical_descriptor_count_usize)
+            .map(|chunk| SegmentDescriptor::from_byte_slice(chunk))
+            .collect();
+
+        Ok(Self {
+            descriptor_count,
+            logical_descriptor_count,
+            logical_segment_descriptors,
+            group_descriptors,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct SegmentDescriptor {
+    pub flags: SegmentDescriptorFlags, // u16
+    pub logical_overlay_number: u16,
+    pub descriptor_group_index: u16,
+    pub frame: u16,
+    pub segment_name_offset: u16,
+    pub class_name_offset: u16,
+    pub logical_segment_offset: u32,
+    pub segment_count_bytes: u32,
+}
+impl SegmentDescriptor {
+    pub fn from_byte_slice(bytes: &[u8]) -> Self {
+        if bytes.len() != 20 {
+            panic!("byte slice has {} items, expected 20", bytes.len());
+        }
+
+        let flags_u16 = u16::from_le_byte_slice(&bytes[0..2]);
+        let logical_overlay_number = u16::from_le_byte_slice(&bytes[2..4]);
+        let descriptor_group_index = u16::from_le_byte_slice(&bytes[4..6]);
+        let frame = u16::from_le_byte_slice(&bytes[6..8]);
+        let segment_name_offset = u16::from_le_byte_slice(&bytes[8..10]);
+        let class_name_offset = u16::from_le_byte_slice(&bytes[10..12]);
+        let logical_segment_offset = u32::from_le_byte_slice(&bytes[12..16]);
+        let segment_count_bytes = u32::from_le_byte_slice(&bytes[16..20]);
+
+        let flags = SegmentDescriptorFlags::from_bits_retain(flags_u16);
+
+        Self {
+            flags,
+            logical_overlay_number,
+            descriptor_group_index,
+            frame,
+            segment_name_offset,
+            class_name_offset,
+            logical_segment_offset,
+            segment_count_bytes,
+        }
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+    pub struct SegmentDescriptorFlags : u16 {
+        const READ = 0x0001;
+        const WRITE = 0x0002;
+        const EXECUTE = 0x0004;
+        const LINEAR_ADDRESS_32 = 0x0008;
+        // 0x0010, 0x0020, 0x0040, 0x0080 reserved
+        const SELECTOR = 0x0100;
+        const ABSOLUTE_ADDRESS = 0x0200;
+        // 0x0400, 0x0800 reserved
+        const GROUP = 0x1000;
+        // 0x2000, 0x4000, 0x8000 reserved
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct FileIndexSubsection {
+    pub module_count: u16,
+    pub name_reference_count: u16,
+    pub module_start_indexes: Vec<u16>, // [u16; module_count]
+    pub file_name_reference_count_per_module: Vec<u16>, // [u16; module_count]
+    pub name_reference_offsets: Vec<u32>, // [u32; name_reference_count]
+    pub names: Vec<DisplayBytesVec>, // length???
+}
+impl FileIndexSubsection {
+    #[instrument(skip_all)]
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut header_buf = [0u8; 4];
+        reader.read_exact(&mut header_buf)?;
+
+        let module_count = u16::from_le_byte_slice(&header_buf[0..2]);
+        let name_reference_count = u16::from_le_byte_slice(&header_buf[2..4]);
+
+        let module_count_usize = usize::from(module_count);
+        let name_reference_count_usize = usize::from(name_reference_count);
+
+        let mut module_start_indexes_buf = vec![0u8; 2*module_count_usize];
+        reader.read_exact(&mut module_start_indexes_buf)?;
+        let module_start_indexes: Vec<u16> = module_start_indexes_buf
+            .chunks(2)
+            .map(|chunk| u16::from_le_byte_slice(chunk))
+            .collect();
+
+        let mut file_name_reference_count_per_module_buf = vec![0u8; 2*module_count_usize];
+        reader.read_exact(&mut file_name_reference_count_per_module_buf)?;
+        let file_name_reference_count_per_module: Vec<u16> = file_name_reference_count_per_module_buf
+            .chunks(2)
+            .map(|chunk| u16::from_le_byte_slice(chunk))
+            .collect();
+
+        let mut name_reference_offsets_buf = vec![0u8; 4*name_reference_count_usize];
+        reader.read_exact(&mut name_reference_offsets_buf)?;
+        let name_reference_offsets: Vec<u32> = name_reference_offsets_buf
+            .chunks(4)
+            .map(|chunk| u32::from_le_byte_slice(chunk))
+            .collect();
+
+        let name_base = reader.seek(SeekFrom::Current(0))?;
+
+        let mut names = Vec::with_capacity(name_reference_offsets.len());
+        for &offset in &name_reference_offsets {
+            reader.seek(SeekFrom::Start(name_base + u64::from(offset)))?;
+            let name_vec = read_pascal_byte_string(reader)?;
+            names.push(DisplayBytesVec::from(name_vec));
+        }
+
+        Ok(Self {
+            module_count,
+            name_reference_count,
+            module_start_indexes,
+            file_name_reference_count_per_module,
+            name_reference_offsets,
+            names,
         })
     }
 }
