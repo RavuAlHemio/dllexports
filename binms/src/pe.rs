@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
-use display_bytes::DisplayBytesVec;
+use display_bytes::{DisplayBytes, DisplayBytesVec};
 use from_to_repr::from_to_other;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -752,7 +752,7 @@ impl From<SectionTable> for Vec<SectionTableEntry> {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SectionTableEntry {
-    pub name: [u8; 8],
+    pub name: DisplayBytes<8>,
     pub virtual_size: u32,
     pub virtual_address: u32,
     pub raw_data_size: u32,

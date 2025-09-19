@@ -68,6 +68,27 @@ impl<const SIZE: usize> IndexMut<usize> for DisplayBytes<SIZE> {
         &mut self.0[index]
     }
 }
+#[cfg(feature = "serde")]
+impl<const SIZE: usize> serde::Serialize for DisplayBytes<SIZE> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+#[cfg(feature = "serde")]
+impl<'d, const SIZE: usize> serde::Deserialize<'d> for DisplayBytes<SIZE> {
+    fn deserialize<D: serde::Deserializer<'d>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::Deserialize;
+        use serde::de::Error as _;
+
+        let inner: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        if inner.len() != SIZE {
+            return Err(D::Error::custom("wrong length"));
+        }
+        let mut inner_buf = [0u8; SIZE];
+        inner_buf.copy_from_slice(&inner);
+        Ok(Self(inner_buf))
+    }
+}
 
 
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
