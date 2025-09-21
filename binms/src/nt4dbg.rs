@@ -3,6 +3,7 @@
 
 use std::io::{self, Read};
 
+use display_bytes::DisplayBytesVec;
 use from_to_repr::from_to_other;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,8 @@ use crate::pe::{SectionTable, SectionTableEntry};
 pub struct DbgFile {
     pub header: Header,
     pub section_table: SectionTable, // yup, same structure as PE
-    pub exported_names: Vec<Vec<u8>>, // [ByteString; next_nul_terminated_strings_for(header.exported_names_table_size)]
-    pub debug_directories: Vec<DebugDirectory>, // [DebugDirectory; header.exported_names_table_size / sizeof(TODO)]
+    pub exported_names: Vec<DisplayBytesVec>, // [ByteString; next_nul_terminated_strings_for(header.exported_names_table_size)]
+    pub debug_directories: Vec<DebugDirectory>, // [DebugDirectory; header.exported_names_table_size / sizeof(DebugDirectory)]
 }
 impl DbgFile {
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
@@ -38,13 +39,14 @@ impl DbgFile {
             }
             exported_names_buf.pop();
         }
-        let exported_names: Vec<Vec<u8>> = exported_names_buf
+        let exported_names: Vec<DisplayBytesVec> = exported_names_buf
             .split(|b| *b == 0x00)
-            .map(|bs| bs.to_vec())
+            .map(|bs| DisplayBytesVec::from(bs.to_vec()))
             .collect();
 
-        let mut debug_directories = Vec::with_capacity(header.debug_directories_size.try_into().unwrap());
-        for _ in 0..header.debug_directories_size {
+        let debug_directories_count = usize::try_from(header.debug_directories_size).unwrap() / DEBUG_DIRECTORY_SIZE;
+        let mut debug_directories = Vec::with_capacity(debug_directories_count);
+        for _ in 0..debug_directories_count {
             let debug_directory = DebugDirectory::read(reader)?;
             debug_directories.push(debug_directory);
         }
@@ -115,6 +117,8 @@ impl Header {
     }
 }
 
+const DEBUG_DIRECTORY_SIZE: usize = 28;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct DebugDirectory {
@@ -122,14 +126,14 @@ pub struct DebugDirectory {
     pub time_date_stamp: u32,
     pub major_version: u16,
     pub minor_version: u16,
-    pub kind: DebugType,
+    pub kind: DebugType, // u32
     pub size: u32,
     pub virtual_address: u32, // generally 0
     pub raw_data_pointer: u32,
 }
 impl DebugDirectory {
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
-        let mut buf = [0u8; 28];
+        let mut buf = [0u8; DEBUG_DIRECTORY_SIZE];
         reader.read_exact(&mut buf)?;
 
         let characteristics = u32::from_le_bytes(buf[0..4].try_into().unwrap());
