@@ -95,7 +95,7 @@ enum PokeExeMode {
     PeIcons(InputFilePeResourceGraphicsArgs),
 
     /// Outputs general information about an NT4-era .DBG file.
-    Nt4DbgInfo(InputFileJsonOutputArgs),
+    Nt4DbgInfo(DebugFileArgs),
 }
 
 #[derive(Parser)]
@@ -140,6 +140,19 @@ struct InputFileJsonOutputArgs {
     pub input_file: PathBuf,
 }
 
+
+#[derive(Parser)]
+struct DebugFileArgs {
+    /// Output information about the container, not the CodeView information.
+    #[arg(short, long)]
+    pub container: bool,
+
+    /// Output the collected information as JSON.
+    #[arg(short, long)]
+    pub json_output: bool,
+
+    pub input_file: PathBuf,
+}
 
 #[derive(Parser)]
 struct InputFileAndIndexArgs {
@@ -897,6 +910,16 @@ fn main() {
                                 .expect("failed to open input file");
                             let dbg_file = binms::nt4dbg::DbgFile::read(&mut input_file)
                                 .expect("failed to read .dbg file");
+
+                            if args.container {
+                                if args.json_output {
+                                    println!("{}", serde_json::to_string_pretty(&dbg_file).expect("failed to JSONify"));
+                                } else {
+                                    println!("{:#?}", dbg_file);
+                                }
+                                return;
+                            }
+
                             let code_view_info = dbg_file.debug_directories
                                 .iter()
                                 .filter(|entry| entry.kind == binms::nt4dbg::DebugType::CodeView)
