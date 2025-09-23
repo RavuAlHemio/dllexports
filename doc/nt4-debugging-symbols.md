@@ -14,4 +14,8 @@ A new subdirectory named `dbgsym` will be created with a sub-sub-directory `dll`
 
 And that's it!
 
-(The symbol-splitting functionality was removed from `rebase.exe` sometime between Windows 2000 and Windows Server 2003; `imagehlp.dll` however contains the underlying `SplitSymbols` function since NT 3.5, as well as Windows 95 OSR2 for the Win9x branch, until today.)
+## How we lost these features
+
+The symbol-splitting functionality was removed from `rebase.exe` sometime between Windows 2000 and Windows Server 2003; `imagehlp.dll` however contains the underlying `SplitSymbols` function since NT 3.5, as well as Windows 95 OSR2 for the Win9x branch, until today.
+
+`link.exe` stopped accepting `/PDB:NONE` with Visual Studio .NET, i.e. Visual C++ 7.
