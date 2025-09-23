@@ -13,3 +13,5 @@ With Visual C++ 4.0 (`cl.exe` and `link.exe`) and the Windows NT 4 SDK (`rebase.
 A new subdirectory named `dbgsym` will be created with a sub-sub-directory `dll` or `exe` which contains the `.dbg` file for your executable or DLL. Simultaneously, the debugging information in the executable or DLL will be replaced with a reference to the `.dbg` file.
 
 And that's it!
+
+(The symbol-splitting functionality was removed from `rebase.exe` sometime between Windows 2000 and Windows Server 2003; `imagehlp.dll` however contains the underlying `SplitSymbols` function since NT 3.5, as well as Windows 95 OSR2 for the Win9x branch, until today.)
