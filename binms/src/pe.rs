@@ -884,9 +884,13 @@ impl ExportData {
         let name_offset = section_table.virtual_to_raw(name_rva)
             .ok_or_else(|| io::ErrorKind::InvalidData)
             .inspect_err(|_| debug!("failed to convert export name address {:#010X} from virtual to raw", name_rva))?;
-        let address_table_offset = section_table.virtual_to_raw(address_table_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)
-            .inspect_err(|_| debug!("failed to convert export address table offset {:#010X} from virtual to raw", address_table_rva))?;
+        let address_table_offset = if address_table_entry_count > 0 {
+            section_table.virtual_to_raw(address_table_rva)
+                .ok_or_else(|| io::ErrorKind::InvalidData)
+                .inspect_err(|_| debug!("failed to convert export address table offset {:#010X} from virtual to raw", address_table_rva))?
+        } else {
+            0
+        };
         let name_pointer_offset = if has_names {
             section_table.virtual_to_raw(name_pointer_rva)
                 .ok_or_else(|| io::ErrorKind::InvalidData)
@@ -907,33 +911,38 @@ impl ExportData {
         let name = read_nul_terminated_ascii_string(reader)?;
 
         // read address table
-        reader.seek(SeekFrom::Start(address_table_offset.into()))?;
-        let mut ordinal_to_address = BTreeMap::new();
-        for relative_ordinal in 0..address_table_entry_count {
-            let ordinal = ordinal_base + relative_ordinal;
-            let mut address_buf = [0u8; 4];
-            reader.read_exact(&mut address_buf)?;
-            let address = u32::from_le_bytes(address_buf);
+        let ordinal_to_address = if address_table_entry_count > 0 {
+            reader.seek(SeekFrom::Start(address_table_offset.into()))?;
+            let mut ordinal_to_address = BTreeMap::new();
+            for relative_ordinal in 0..address_table_entry_count {
+                let ordinal = ordinal_base + relative_ordinal;
+                let mut address_buf = [0u8; 4];
+                reader.read_exact(&mut address_buf)?;
+                let address = u32::from_le_bytes(address_buf);
 
-            if address == 0 {
-                // skip this entry
-                continue;
-            } else if address >= export_directory_entry.address && address < export_directory_entry.address + export_directory_entry.size {
-                // forwarder
-                let addr_pos = section_table.virtual_to_raw(address)
-                    .ok_or_else(|| io::ErrorKind::InvalidData)
-                    .inspect_err(|_| debug!("failed to convert export {} address pointer virtual to raw", relative_ordinal))?;
+                if address == 0 {
+                    // skip this entry
+                    continue;
+                } else if address >= export_directory_entry.address && address < export_directory_entry.address + export_directory_entry.size {
+                    // forwarder
+                    let addr_pos = section_table.virtual_to_raw(address)
+                        .ok_or_else(|| io::ErrorKind::InvalidData)
+                        .inspect_err(|_| debug!("failed to convert export {} address pointer virtual to raw", relative_ordinal))?;
 
-                let addr_table_pos = reader.seek(SeekFrom::Current(0))?;
-                reader.seek(SeekFrom::Start(addr_pos.into()))?;
-                let target = read_nul_terminated_ascii_string(reader)?;
-                reader.seek(SeekFrom::Start(addr_table_pos))?;
-                ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Forwarder { target });
-            } else {
-                // code
-                ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Code { code_rva: address });
+                    let addr_table_pos = reader.seek(SeekFrom::Current(0))?;
+                    reader.seek(SeekFrom::Start(addr_pos.into()))?;
+                    let target = read_nul_terminated_ascii_string(reader)?;
+                    reader.seek(SeekFrom::Start(addr_table_pos))?;
+                    ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Forwarder { target });
+                } else {
+                    // code
+                    ordinal_to_address.insert(ordinal, ExportAddressTableEntry::Code { code_rva: address });
+                }
             }
-        }
+            ordinal_to_address
+        } else {
+            BTreeMap::new()
+        };
 
         // read names
         let name_table = if has_names {
