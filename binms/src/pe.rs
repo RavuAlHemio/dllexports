@@ -874,19 +874,33 @@ impl ExportData {
         let name_pointer_rva = u32::from_le_bytes(buf[32..36].try_into().unwrap());
         let ordinal_table_rva = u32::from_le_bytes(buf[36..40].try_into().unwrap());
 
+        let has_names =
+            name_pointer_and_ordinal_table_entry_count > 0
+            && name_pointer_rva > 0
+            && ordinal_table_rva > 0
+        ;
+
         // start mapping
         let name_offset = section_table.virtual_to_raw(name_rva)
             .ok_or_else(|| io::ErrorKind::InvalidData)
-            .inspect_err(|_| debug!("failed to convert export name address from virtual to raw"))?;
+            .inspect_err(|_| debug!("failed to convert export name address {:#010X} from virtual to raw", name_rva))?;
         let address_table_offset = section_table.virtual_to_raw(address_table_rva)
             .ok_or_else(|| io::ErrorKind::InvalidData)
-            .inspect_err(|_| debug!("failed to convert export address table offset from virtual to raw"))?;
-        let name_pointer_offset = section_table.virtual_to_raw(name_pointer_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)
-            .inspect_err(|_| debug!("failed to convert export name pointer offset from virtual to raw"))?;
-        let ordinal_table_offset = section_table.virtual_to_raw(ordinal_table_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)
-            .inspect_err(|_| debug!("failed to convert export ordinal table offset from virtual to raw"))?;
+            .inspect_err(|_| debug!("failed to convert export address table offset {:#010X} from virtual to raw", address_table_rva))?;
+        let name_pointer_offset = if has_names {
+            section_table.virtual_to_raw(name_pointer_rva)
+                .ok_or_else(|| io::ErrorKind::InvalidData)
+                .inspect_err(|_| debug!("failed to convert export name pointer offset {:#010X} from virtual to raw", name_pointer_rva))?
+        } else {
+            0
+        };
+        let ordinal_table_offset = if has_names {
+            section_table.virtual_to_raw(ordinal_table_rva)
+                .ok_or_else(|| io::ErrorKind::InvalidData)
+                .inspect_err(|_| debug!("failed to convert export ordinal table offset {:#010X} from virtual to raw", ordinal_table_rva))?
+        } else {
+            0
+        };
 
         // read name
         reader.seek(SeekFrom::Start(name_offset.into()))?;
@@ -922,34 +936,44 @@ impl ExportData {
         }
 
         // read names
-        let mut name_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
-        reader.seek(SeekFrom::Start(name_pointer_offset.into()))?;
-        for i in 0..name_pointer_and_ordinal_table_entry_count {
-            let mut address_buf = [0u8; 4];
-            reader.read_exact(&mut address_buf)?;
-            let address = u32::from_le_bytes(address_buf);
-            let offset = section_table.virtual_to_raw(address)
-                .ok_or_else(|| io::ErrorKind::InvalidData)
-                .inspect_err(|_| debug!("failed to convert name {} offset virtual to raw", i))?;
-            let name_pointer_pos = reader.seek(SeekFrom::Current(0))?;
-            reader.seek(SeekFrom::Start(offset.into()))?;
-            let name = read_nul_terminated_ascii_string(reader)?;
-            reader.seek(SeekFrom::Start(name_pointer_pos))?;
-            name_table.push(name);
-        }
+        let name_table = if has_names {
+            let mut name_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
+            reader.seek(SeekFrom::Start(name_pointer_offset.into()))?;
+            for i in 0..name_pointer_and_ordinal_table_entry_count {
+                let mut address_buf = [0u8; 4];
+                reader.read_exact(&mut address_buf)?;
+                let address = u32::from_le_bytes(address_buf);
+                let offset = section_table.virtual_to_raw(address)
+                    .ok_or_else(|| io::ErrorKind::InvalidData)
+                    .inspect_err(|_| debug!("failed to convert name {} offset virtual to raw", i))?;
+                let name_pointer_pos = reader.seek(SeekFrom::Current(0))?;
+                reader.seek(SeekFrom::Start(offset.into()))?;
+                let name = read_nul_terminated_ascii_string(reader)?;
+                reader.seek(SeekFrom::Start(name_pointer_pos))?;
+                name_table.push(name);
+            }
+            name_table
+        } else {
+            Vec::with_capacity(0)
+        };
 
         // read ordinals for the names
         // (this is necessary because the name table is sorted ASCIIbetically to enable binary searches,
         // so the mapping from index to ordinal must be explicit)
-        let mut name_ordinal_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
-        reader.seek(SeekFrom::Start(ordinal_table_offset.into()))?;
-        for _ in 0..name_pointer_and_ordinal_table_entry_count {
-            let mut relative_ordinal_buf = [0u8; 2];
-            reader.read_exact(&mut relative_ordinal_buf)?;
-            let relative_ordinal = u16::from_le_bytes(relative_ordinal_buf);
-            let ordinal = ordinal_base + u32::from(relative_ordinal);
-            name_ordinal_table.push(ordinal);
-        }
+        let name_ordinal_table = if has_names {
+            let mut name_ordinal_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
+            reader.seek(SeekFrom::Start(ordinal_table_offset.into()))?;
+            for _ in 0..name_pointer_and_ordinal_table_entry_count {
+                let mut relative_ordinal_buf = [0u8; 2];
+                reader.read_exact(&mut relative_ordinal_buf)?;
+                let relative_ordinal = u16::from_le_bytes(relative_ordinal_buf);
+                let ordinal = ordinal_base + u32::from(relative_ordinal);
+                name_ordinal_table.push(ordinal);
+            }
+            name_ordinal_table
+        } else {
+            Vec::with_capacity(0)
+        };
 
         // join the preceding two tables
         let name_to_ordinal: BTreeMap<String, u32> = name_table.into_iter()
