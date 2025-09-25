@@ -1,86 +1,85 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
-use regex::Regex;
+use rhai::{Array, Dynamic, Engine, ImmutableString, Scope};
 use serde_json;
-
-
-#[derive(Debug)]
-enum IgnoreEntry {
-    IgnoreOrdinal(usize),
-    AcceptName(Regex),
-    IgnoreName(Regex),
-    IgnoreSymbol(Regex),
-}
 
 
 #[derive(Parser)]
 struct Opts {
     exports_list: PathBuf,
-    ignore_list: PathBuf,
+    ignore_script: PathBuf,
 }
 
 
-fn read_ignore_list(path: &Path) -> Vec<IgnoreEntry> {
-    // read entries from the ignore list
-    let ignore_file = File::open(path)
-        .expect("failed to open ignore file");
-    let mut ignore_reader = BufReader::new(ignore_file);
+fn remove_prefix(this: ImmutableString, prefix: ImmutableString) -> Dynamic {
+    if let Some(stripped) = this.strip_prefix(prefix.as_str()) {
+        Dynamic::from(stripped.to_owned())
+    } else {
+        Dynamic::UNIT
+    }
+}
 
-    let mut string = String::new();
-    let mut ignore_list = Vec::new();
-    loop {
-        string.clear();
-        let bytes_read = ignore_reader.read_line(&mut string)
-            .expect("failed to read line");
-        if bytes_read == 0 {
-             break;
-        }
-
-        let trimmed = string.trim();
-        if trimmed.len() == 0 {
-            // empty line
-            continue;
-        }
-        if trimmed.starts_with("#") {
-            // comment
-            continue;
-        }
-
-        if trimmed.starts_with("@") {
-            // ignore ordinal
-            let ordinal: usize = trimmed[1..].parse()
-                .expect("invalid ordinal");
-            ignore_list.push(IgnoreEntry::IgnoreOrdinal(ordinal));
+fn join(glue: ImmutableString, pieces: Array) -> Dynamic {
+    let mut ret = String::new();
+    let mut first_piece = true;
+    for piece in &pieces {
+        if first_piece {
+            first_piece = false;
         } else {
-            // it's a regex
-            let mode = &trimmed[0..1];
-            if mode != "+" && mode != "-" && mode != "!" {
-                panic!("unknown line type {:?}", trimmed);
-            }
+            ret.push_str(glue.as_str());
+        }
 
-            let regex_string = format!("^(?i){}$", &trimmed[1..]);
-            let regex = Regex::new(&regex_string)
-                .expect("failed to compile regex");
-            let entry = match mode {
-                "+" => IgnoreEntry::AcceptName(regex),
-                "-" => IgnoreEntry::IgnoreName(regex),
-                "!" => IgnoreEntry::IgnoreSymbol(regex),
-                _ => unreachable!(),
-            };
-            ignore_list.push(entry);
+        if let Ok(s) = piece.clone().into_string() {
+            ret.push_str(s.as_str());
+        } else {
+            ret.push_str(&piece.to_string());
         }
     }
+    Dynamic::from(ret)
+}
 
-    ignore_list
+fn opt_usize_to_dynamic(ous: Option<usize>) -> Dynamic {
+    if let Some(us) = ous {
+        Dynamic::from(us)
+    } else {
+        Dynamic::UNIT
+    }
+}
+fn opt_str_to_dynamic<T: Into<String>>(os: Option<T>) -> Dynamic {
+    if let Some(s) = os {
+        Dynamic::from(s.into())
+    } else {
+        Dynamic::UNIT
+    }
+}
+fn dynamic_to_opt_usize(dy: Dynamic) -> Option<usize> {
+    if dy.is_unit() {
+        None
+    } else {
+        Some(dy.cast())
+    }
+}
+fn dynamic_to_opt_string(dy: Dynamic) -> Option<String> {
+    if dy.is_unit() {
+        None
+    } else {
+        Some(dy.cast())
+    }
 }
 
 
 fn main() {
     let opts = Opts::parse();
-    let ignore_list = read_ignore_list(&opts.ignore_list);
+
+    let mut engine = Engine::new();
+    engine.register_fn("remove_prefix", remove_prefix);
+    engine.register_fn("join", join);
+
+    let ignore_script = engine.compile_file(opts.ignore_script.clone())
+        .expect("failed to compile ignore script");
 
     let export_file = File::open(&opts.exports_list)
         .expect("failed to open export file");
@@ -99,8 +98,12 @@ fn main() {
         let pieces: Vec<&str> = trimmed.split("\t").collect();
         let path_parts: Vec<String> = serde_json::from_str(&pieces[0])
             .expect("failed to parse path parts");
-        let filename_opt = path_parts.last()
-            .map(|pp| pp.split(|c| c == '/' || c == '\\').last().unwrap());
+        let filename_opt: Option<String> = path_parts.last()
+            .map(|pp| pp
+                .split(|c| c == '/' || c == '\\')
+                .last().unwrap()
+                .to_owned()
+            );
         let ordinal_opt: Option<usize> = if pieces[1].len() == 0 {
             None
         } else {
@@ -108,53 +111,51 @@ fn main() {
                 .expect("failed to parse ordinal");
             Some(ordinal)
         };
-        let name_opt: Option<&str> = if pieces[2].len() == 0 {
+        let name_opt: Option<String> = if pieces[2].len() == 0 {
             None
         } else {
-            Some(pieces[2])
+            Some(pieces[2].to_owned())
         };
 
-        // filter?
-        let mut output_export = true;
-        for ignore_entry in &ignore_list {
-            match ignore_entry {
-                IgnoreEntry::IgnoreOrdinal(o) => {
-                    if let Some(ordinal) = ordinal_opt {
-                        if ordinal == *o {
-                            output_export = false;
-                            break;
-                        }
-                    }
-                },
-                IgnoreEntry::AcceptName(r) => {
-                    if let Some(file_name) = filename_opt {
-                        if r.is_match(file_name) {
-                            output_export = true;
-                            break;
-                        }
-                    }
-                },
-                IgnoreEntry::IgnoreName(r) => {
-                    if let Some(file_name) = filename_opt {
-                        if r.is_match(file_name) {
-                            output_export = false;
-                            break;
-                        }
-                    }
-                },
-                IgnoreEntry::IgnoreSymbol(r) => {
-                    if let Some(name) = name_opt {
-                        if r.is_match(name) {
-                            output_export = false;
-                            break;
-                        }
-                    }
-                },
-            }
-        }
+        let path_parts_rhai: Array = path_parts.iter()
+            .map(|pp| Dynamic::from(pp.clone()))
+            .collect();
+
+        let mut scope = Scope::new();
+        scope.push("path_parts", path_parts_rhai);
+        scope.push("filename_opt", opt_str_to_dynamic(filename_opt));
+        scope.push("ordinal_opt", opt_usize_to_dynamic(ordinal_opt));
+        scope.push("name_opt", opt_str_to_dynamic(name_opt));
+
+        let output_export: bool = engine.eval_ast_with_scope(&mut scope, &ignore_script)
+            .expect("failed to evaluate AST");
 
         if output_export {
-            print!("{}", string);
+            let new_filename = dynamic_to_opt_string(
+                scope.get_value("filename")
+                    .expect("filename missing from scope")
+            )
+                .expect("script did not provide a new filename");
+            let new_ordinal_opt = dynamic_to_opt_usize(
+                scope.get_value("ordinal_opt")
+                    .expect("ordinal_opt missing from scope")
+            );
+            let new_name_opt = dynamic_to_opt_string(
+                scope.get_value("name_opt")
+                    .expect("name_opt missing from scope")
+            );
+
+            let new_filename_json_list = serde_json::json!([new_filename]);
+
+            print!("{}\t", new_filename_json_list);
+            if let Some(new_ordinal) = new_ordinal_opt {
+                print!("{}", new_ordinal);
+            }
+            print!("\t");
+            if let Some(new_name) = new_name_opt {
+                print!("{}", new_name);
+            }
+            println!();
         }
     }
 }
