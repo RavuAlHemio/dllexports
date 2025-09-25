@@ -9,6 +9,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use bitflags::bitflags;
 use display_bytes::DisplayBytesVec;
 use from_to_repr::{FromToRepr, from_to_other};
+use tracing::debug;
 
 
 const SEGMENTED_HEADER_OFFSET_OFFSET: u64 = 0x3C;
@@ -62,6 +63,7 @@ impl Executable {
 
         // prerequisite for an NE executable: MZ relocation data at 0x0040
         if mz.relocation_table_offset != 0x0040 {
+            debug!("relocation table offset is {:#06X}, expected 0x0040", mz.relocation_table_offset);
             return Err(io::ErrorKind::InvalidData.into());
         }
 
@@ -75,6 +77,7 @@ impl Executable {
         let mut signature_buf = [0u8; 2];
         reader.read_exact(&mut signature_buf)?;
         if &signature_buf != b"NE" {
+            debug!("NE executable signature is not b\"NE\"");
             return Err(io::ErrorKind::InvalidData.into());
         }
 

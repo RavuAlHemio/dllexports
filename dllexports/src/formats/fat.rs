@@ -7,6 +7,7 @@ use expandms::fat::{
     AllocationTable, Attributes, DirectoryEntry, DIRECTORY_ENTRY_SIZE_BYTES, FatEntry, FatHeader,
     read_cluster_chain_into, RootDirectoryLocation,
 };
+use tracing::debug;
 
 use crate::data_mgmt::{Error, MultiFileContainer};
 
@@ -26,6 +27,7 @@ impl FatFileSystem {
         let header = FatHeader::read(&mut cursor)?;
         if header.fat_bytes() > data.len() {
             // yeah, that's an invalid header
+            debug!("header claims FAT byte count is greater than fits into file");
             return Err(Error::Io(ErrorKind::InvalidData.into()));
         }
 
@@ -41,12 +43,14 @@ impl FatFileSystem {
         )?;
 
         let Some(first_fat_entry) = fat.entries.get(0) else {
+            debug!("FAT is missing entry at index 0");
             return Err(Error::Io(ErrorKind::InvalidData.into()));
         };
         match first_fat_entry {
             FatEntry::MediaType(_) => {},
             _ => {
                 // not actually FAT
+                debug!("FAT entry at index 0 is not a media type entry");
                 return Err(Error::Io(ErrorKind::InvalidData.into()));
             },
         }

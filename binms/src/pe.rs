@@ -53,6 +53,7 @@ impl Executable {
         let mut signature_buf = [0u8; 4];
         reader.read_exact(&mut signature_buf)?;
         if &signature_buf != b"PE\0\0" {
+            debug!("PE executable signature is not b\"PE\\0\\0\"");
             return Err(io::ErrorKind::InvalidData.into());
         }
 
@@ -846,6 +847,7 @@ impl ExportData {
     pub fn read<R: Read + Seek>(reader: &mut R, export_directory_entry: &DataDirectoryEntry, section_table: &SectionTable) -> Result<Self, io::Error> {
         // ensure the sections don't overlap
         if section_table.has_overlap() {
+            debug!("PE sections overlap");
             return Err(io::ErrorKind::InvalidData.into());
         }
 
@@ -853,7 +855,8 @@ impl ExportData {
 
         // go to offset of export directory
         let export_directory_offset = section_table.virtual_to_raw(export_directory_entry.address)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert export directory entry address from virtual to raw"))?;
         reader.seek(SeekFrom::Start(export_directory_offset.into()))?;
 
         let mut buf = [0u8; 40];
@@ -873,13 +876,17 @@ impl ExportData {
 
         // start mapping
         let name_offset = section_table.virtual_to_raw(name_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert export name address from virtual to raw"))?;
         let address_table_offset = section_table.virtual_to_raw(address_table_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert export address table offset from virtual to raw"))?;
         let name_pointer_offset = section_table.virtual_to_raw(name_pointer_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert export name pointer offset from virtual to raw"))?;
         let ordinal_table_offset = section_table.virtual_to_raw(ordinal_table_rva)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert export ordinal table offset from virtual to raw"))?;
 
         // read name
         reader.seek(SeekFrom::Start(name_offset.into()))?;
@@ -900,7 +907,8 @@ impl ExportData {
             } else if address >= export_directory_entry.address && address < export_directory_entry.address + export_directory_entry.size {
                 // forwarder
                 let addr_pos = section_table.virtual_to_raw(address)
-                    .ok_or_else(|| io::ErrorKind::InvalidData)?;
+                    .ok_or_else(|| io::ErrorKind::InvalidData)
+                    .inspect_err(|_| debug!("failed to convert export {} address pointer virtual to raw", relative_ordinal))?;
 
                 let addr_table_pos = reader.seek(SeekFrom::Current(0))?;
                 reader.seek(SeekFrom::Start(addr_pos.into()))?;
@@ -916,12 +924,13 @@ impl ExportData {
         // read names
         let mut name_table = Vec::with_capacity(name_pointer_and_ordinal_table_entry_count.try_into().unwrap());
         reader.seek(SeekFrom::Start(name_pointer_offset.into()))?;
-        for _ in 0..name_pointer_and_ordinal_table_entry_count {
+        for i in 0..name_pointer_and_ordinal_table_entry_count {
             let mut address_buf = [0u8; 4];
             reader.read_exact(&mut address_buf)?;
             let address = u32::from_le_bytes(address_buf);
             let offset = section_table.virtual_to_raw(address)
-                .ok_or_else(|| io::ErrorKind::InvalidData)?;
+                .ok_or_else(|| io::ErrorKind::InvalidData)
+                .inspect_err(|_| debug!("failed to convert name {} offset virtual to raw", i))?;
             let name_pointer_pos = reader.seek(SeekFrom::Current(0))?;
             reader.seek(SeekFrom::Start(offset.into()))?;
             let name = read_nul_terminated_ascii_string(reader)?;
@@ -1075,6 +1084,7 @@ impl ResourceDirectoryTable {
     pub fn read_root_from_pe<R: Read + Seek>(reader: &mut R, resource_table_directory_entry: &DataDirectoryEntry, section_table: &SectionTable) -> Result<Self, io::Error> {
         // ensure the sections don't overlap
         if section_table.has_overlap() {
+            debug!("sections overlap while trying to read resource root");
             return Err(io::ErrorKind::InvalidData.into());
         }
 
@@ -1082,7 +1092,8 @@ impl ResourceDirectoryTable {
 
         // go to offset of resource table directory
         let resource_table_directory_offset = section_table.virtual_to_raw(resource_table_directory_entry.address)
-            .ok_or_else(|| io::ErrorKind::InvalidData)?;
+            .ok_or_else(|| io::ErrorKind::InvalidData)
+            .inspect_err(|_| debug!("failed to convert resource table address from virtual to raw"))?;
         reader.seek(SeekFrom::Start(resource_table_directory_offset.into()))?;
 
         // recursively read the topmost table

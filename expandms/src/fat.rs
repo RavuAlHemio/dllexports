@@ -7,6 +7,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
 use display_bytes::DisplayBytes;
+use tracing::debug;
 
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -48,6 +49,7 @@ impl FatHeader {
         let bytes_per_sector = u16::from_le_bytes(header_buf[11..13].try_into().unwrap());
         let sectors_per_cluster = header_buf[13];
         if sectors_per_cluster == 0 {
+            debug!("FAT sectors-per-cluster value is 0");
             return Err(io::ErrorKind::InvalidData.into());
         }
         let reserved_sector_count = u16::from_le_bytes(header_buf[14..16].try_into().unwrap());
@@ -151,12 +153,14 @@ impl AllocationTable {
         if entries.len() > 0 {
             // first value must be a media type entry
             if !matches!(entries[0], FatEntry::MediaType(_)) {
+                debug!("first FAT entry is not a media-type entry");
                 return Err(io::ErrorKind::InvalidData.into());
             }
         }
         if entries.len() > 1 {
             // second value must be the sentinel value
             if entries[1] != FatEntry::Sentinel {
+                debug!("second FAT entry is not a sentinel entry");
                 return Err(io::ErrorKind::InvalidData.into());
             }
         }
@@ -275,11 +279,18 @@ pub fn read_cluster_chain_into<R: Read + Seek>(reader: &mut R, header: &FatHeade
     loop {
         // read the cluster entry from the allocation table
         let current_cluster_entry = fat.entries.get(usize::try_from(current_cluster_index).unwrap())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))
+            .inspect_err(|_| debug!("failed to obtain FAT entry for cluster {}", current_cluster_index))?;
         match current_cluster_entry {
             FatEntry::Empty => return Ok(()),
-            FatEntry::Bad => return Err(io::ErrorKind::InvalidData.into()),
-            FatEntry::MediaType(_) => return Err(io::ErrorKind::InvalidData.into()),
+            FatEntry::Bad => {
+                debug!("bad FAT entry for cluster {}", current_cluster_index);
+                return Err(io::ErrorKind::InvalidData.into());
+            },
+            FatEntry::MediaType(_) => {
+                debug!("cluster {} contains a media type; expecting chain or sentinel", current_cluster_index);
+                return Err(io::ErrorKind::InvalidData.into());
+            },
             FatEntry::Sentinel|FatEntry::Chain(_) => {},
         }
 

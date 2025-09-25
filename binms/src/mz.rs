@@ -8,6 +8,8 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
+use tracing::debug;
+
 
 pub const BYTES_PER_PARAGRAPH: usize = 16;
 pub const BYTES_PER_PAGE: usize = 512;
@@ -37,6 +39,7 @@ impl Executable {
         let mut signature = [0u8; 2];
         reader.read_exact(&mut signature)?;
         if &signature != b"MZ" {
+            debug!("executable signature is not b\"MZ\"");
             return Err(io::ErrorKind::InvalidData.into());
         }
 

@@ -347,6 +347,7 @@ impl<'r, R: Read> Inflater<'r, R> {
                     let mut previous_code_length = None;
                     while code_lengths.len() < total_code_count {
                         let definition_value = definition_tree.decode_one_from_bit_reader(&mut self.reader)
+                            .inspect_err(|_| debug!("failed to decode definition value from reader"))
                             .map_err(|_| Error::DecodingDefinitionValue)?
                             .ok_or_else(|| Error::Io(io::ErrorKind::InvalidData.into()))?;
                         match definition_value {
@@ -448,6 +449,7 @@ impl<'r, R: Read> Inflater<'r, R> {
             },
             3 => {
                 // reserved
+                debug!("block type 3 is reserved");
                 return Err(Error::Io(io::ErrorKind::InvalidData.into()));
             },
             _ => unreachable!(),

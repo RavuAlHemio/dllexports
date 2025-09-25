@@ -21,6 +21,7 @@ use std::io::{self, Read, Seek};
 
 use bitflags::bitflags;
 use from_to_repr::from_to_other;
+use tracing::debug;
 
 use crate::io_util::{ByteBufReadable, ReadEndian};
 
@@ -54,6 +55,7 @@ impl CabHeader {
         let mut signature = [0u8; 4];
         reader.read_exact(&mut signature)?;
         if &signature != b"MSCF" {
+            debug!("CAB file does not start with b\"MSCF\"");
             return Err(io::ErrorKind::InvalidData.into());
         }
 

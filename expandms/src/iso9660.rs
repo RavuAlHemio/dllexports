@@ -6,6 +6,7 @@ use std::io::{self, Read};
 use bitflags::bitflags;
 use display_bytes::DisplayBytes;
 use from_to_repr::from_to_other;
+use tracing::debug;
 
 use crate::io_util::{read_bytes_variable, ByteBufReadable, ReadEndian};
 
@@ -710,6 +711,7 @@ impl DirectoryRecord {
         let length = ByteBufReadable::read(buf, pos);
         if length != 34 {
             // if it's in the volume descriptor, it has to be 34 bytes long
+            debug!("directory record in volume descriptor is {} bytes long, expected 34", length);
             return Err(io::ErrorKind::InvalidData.into());
         }
 
