@@ -43,7 +43,7 @@ fn join(glue: ImmutableString, pieces: Array) -> Dynamic {
 
 fn opt_usize_to_dynamic(ous: Option<usize>) -> Dynamic {
     if let Some(us) = ous {
-        Dynamic::from(us)
+        Dynamic::from_int(us.try_into().unwrap())
     } else {
         Dynamic::UNIT
     }
@@ -59,7 +59,8 @@ fn dynamic_to_opt_usize(dy: Dynamic) -> Option<usize> {
     if dy.is_unit() {
         None
     } else {
-        Some(dy.cast())
+        let int_val: i64 = dy.cast();
+        Some(int_val.try_into().unwrap())
     }
 }
 fn dynamic_to_opt_string(dy: Dynamic) -> Option<String> {
