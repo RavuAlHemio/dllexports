@@ -3,11 +3,10 @@
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows_core::{HRESULT, interface, IUnknown, IUnknown_Vtbl};
 
-use crate::z7_com::PROPID;
+use crate::z7_com::{FILETIME, PROPID};
 
 
 #[interface("23170F69-40C1-278A-0000-000300010000")]
