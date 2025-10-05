@@ -1,46 +1,41 @@
-#![allow(non_camel_case_types, non_snake_case)]
-
-
 use std::ffi::c_void;
 
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows_core::{HRESULT, interface, IUnknown, IUnknown_Vtbl};
+use windows_core::{HRESULT, IUnknown, IUnknown_Vtbl};
+use winunpack_macros::interface_7zip;
 
 use crate::z7_com::{FILETIME, PROPID};
 
 
-#[interface("23170F69-40C1-278A-0000-000300010000")]
+#[interface_7zip(3, 0x01)]
 pub unsafe trait ISequentialInStream : IUnknown {
     fn Read(&self, data: *mut c_void, size: u32, processed_size: *mut u32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000300020000")]
+#[interface_7zip(3, 0x02)]
 pub unsafe trait ISequentialOutStream : IUnknown {
     fn Write(&self, data: *const c_void, size: u32, processed_size: *mut u32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000300030000")]
+#[interface_7zip(3, 0x03)]
 pub unsafe trait IInStream : ISequentialInStream {
     fn Seek(&self, offset: i64, seek_origin: u32, new_position: *mut u64) -> HRESULT;
 }
-
-#[interface("23170F69-40C1-278A-0000-000300040000")]
+#[interface_7zip(3, 0x04)]
 pub unsafe trait IOutStream : ISequentialOutStream {
     fn Seek(&self, offset: i64, seek_origin: u32, new_position: *mut u64) -> HRESULT;
     fn SetSize(&self, new_size: u64) -> HRESULT;
 }
-
-#[interface("23170F69-40C1-278A-0000-000300060000")]
+#[interface_7zip(3, 0x06)]
 pub unsafe trait IStreamGetSize : IUnknown {
     fn GetSize(&self, size: *mut u64) -> HRESULT;
 }
-
-#[interface("23170F69-40C1-278A-0000-000300070000")]
+#[interface_7zip(3, 0x07)]
 pub unsafe trait IOutStreamFinish : IUnknown {
     fn OutStreamFinish(&self) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000300080000")]
+#[interface_7zip(3, 0x08)]
 pub unsafe trait IStreamGetProps : IUnknown {
     fn GetProps(&self, size: *mut u64, c_time: *mut FILETIME, a_time: *mut FILETIME, m_time: *mut FILETIME, attrib: *mut u32) -> HRESULT;
 }
@@ -59,18 +54,18 @@ pub struct CStreamFileProps {
     pub m_time: FILETIME,
 }
 
-#[interface("23170F69-40C1-278A-0000-000300090000")]
+#[interface_7zip(3, 0x09)]
 pub unsafe trait IStreamGetProps2 : IUnknown {
     fn GetProps(&self, props: *mut CStreamFileProps) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-0003000A0000")]
+#[interface_7zip(3, 0x0A)]
 pub unsafe trait IStreamGetProp : IUnknown {
     fn GetProperty(&self, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
     fn ReloadProps(&self) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000300100000")]
+#[interface_7zip(3, 0x10)]
 pub unsafe trait IStreamSetRestriction : IUnknown {
     fn SetRestriction(&self, begin: u64, end: u64) -> HRESULT;
 }

@@ -986,11 +986,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
+name = "winunpack-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "winunpack-win"
 version = "0.1.0"
 dependencies = [
+ "from-to-repr",
  "windows",
  "windows-core",
+ "winunpack-macros",
 ]
 
 [[package]]

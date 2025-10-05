@@ -5,6 +5,7 @@ members = [
     "dllexports",
     "expandms",
     "filtexp",
+    "winunpack-macros",
     "winunpack-win",
 ]
 resolver = "2"

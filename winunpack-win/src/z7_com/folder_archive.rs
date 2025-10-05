@@ -1,15 +1,22 @@
-#![allow(non_camel_case_types, non_snake_case)]
+use std::ffi::c_void;
 
-
+use from_to_repr::from_to_other;
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows_core::{interface, IUnknown, IUnknown_Vtbl, HRESULT};
+use windows_core::{HRESULT, IUnknown, IUnknown_Vtbl, OutRef};
+use winunpack_macros::interface_7zip;
 
 use crate::z7_com::{FILETIME, PROPID, wchar_t};
+use crate::z7_com::folder::IFolderFolder;
 use crate::z7_com::progress::{IProgress, IProgress_Impl, IProgress_Vtbl};
 use crate::z7_com::stream::ISequentialOutStream;
 
 
-#[interface("23170F69-40C1-278A-0000-000100070000")]
+// implement later (or not)
+pub type FStringVector = c_void;
+pub type CCodecs = c_void;
+
+
+#[interface_7zip(1, 0x07)]
 pub unsafe trait IFolderArchiveExtractCallback : IProgress {
     fn AskOverwrite(
         &self,
@@ -22,12 +29,12 @@ pub unsafe trait IFolderArchiveExtractCallback : IProgress {
     fn SetOperationResult(&self, op_res: i32, encrypted: i32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100080000")]
+#[interface_7zip(1, 0x08)]
 pub unsafe trait IFolderArchiveExtractCallback2 : IUnknown {
     fn ReportExtractResult(&self, op_res: i32, encrypted: i32, name: *mut wchar_t) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-0001000B0000")]
+#[interface_7zip(1, 0x0B)]
 pub unsafe trait IFolderArchiveUpdateCallback : IProgress {
     fn CompressOperation(&self, name: *mut wchar_t) -> HRESULT;
     fn DeleteOperation(&self, name: *mut wchar_t) -> HRESULT;
@@ -36,33 +43,33 @@ pub unsafe trait IFolderArchiveUpdateCallback : IProgress {
     fn SetNumFiles(&self, num_files: u64) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-0001000F0000")]
+#[interface_7zip(1, 0x0F)]
 pub unsafe trait IOutFolderArchive : IUnknown {
-    fn SetFolder(&self, folder: *mut IFolderFolder) -> HRESULT;
+    fn SetFolder(&self, folder: IFolderFolder) -> HRESULT;
     fn SetFiles(&self, folder_prefix: *const wchar_t, names: *const *const wchar_t, num_names: u32) -> HRESULT;
     fn DeleteItems(
         &self,
-        out_archive_stream: *mut ISequentialOutStream,
-        indices: *const u32, num_items: u32, update_callback: *mut IFolderArchiveUpdateCallback,
+        out_archive_stream: ISequentialOutStream,
+        indices: *const u32, num_items: u32, update_callback: IFolderArchiveUpdateCallback,
     ) -> HRESULT;
     fn DoOperation(
         &self,
         requested_paths: *mut FStringVector,
         processed_paths: *mut FStringVector,
         codecs: *mut CCodecs, index: i32,
-        out_archive_stream: *mut ISequentialOutStream, state_actions: *const u8, sfx_module: *const wchar_t,
-        update_callback: *mut IFolderUpdateCallback,
+        out_archive_stream: ISequentialOutStream, state_actions: *const u8, sfx_module: *const wchar_t,
+        update_callback: IFolderArchiveUpdateCallback,
     ) -> HRESULT;
     fn DoOperation2(
         &self,
         requested_paths: *mut FStringVector,
         processed_paths: *mut FStringVector,
-        out_archive_stream: *mut ISequentialOutStream, state_actions: *const u8, sfx_module: *const wchar_t,
-        update_callback: *mut IFolderUpdateCallback,
+        out_archive_stream: ISequentialOutStream, state_actions: *const u8, sfx_module: *const wchar_t,
+        update_callback: IFolderArchiveUpdateCallback,
     ) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100100000")]
+#[interface_7zip(1, 0x10)]
 pub unsafe trait IFolderArchiveUpdateCallback2 : IUnknown {
     fn OpenFileError(&self, path: *mut wchar_t, error_code: HRESULT) -> HRESULT;
     fn ReadingFileError(&self, path: *mut wchar_t, error_code: HRESULT) -> HRESULT;
@@ -70,23 +77,32 @@ pub unsafe trait IFolderArchiveUpdateCallback2 : IUnknown {
     fn ReportUpdateOperation(&self, notify_op: i32, path: *const wchar_t, is_dir: i32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100110000")]
+#[interface_7zip(1, 0x11)]
 pub unsafe trait IFolderScanProgress : IUnknown {
     fn ScanError(&self, path: *const wchar_t, error_code: HRESULT) -> HRESULT;
     fn ScanProgress(&self, num_folders: u64, num_files: u64, total_size: u64, path: *const wchar_t, is_dir: i32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100120000")]
-pub unsafe trait IFolderSetZoneIdMode : IUnknown {
-    fn SetZoneIdMode(&self, zone_mode: NExtract::NZoneIdMode::EEnum) -> HRESULT;
+#[derive(Clone, Copy, Debug)]
+#[from_to_other(base_type = i32, derive_compare = "as_int")]
+pub enum NZoneIdMode {
+    None = 0,
+    All = 1,
+    Office = 2,
+    Other(i32),
 }
 
-#[interface("23170F69-40C1-278A-0000-000100130000")]
+#[interface_7zip(1, 0x12)]
+pub unsafe trait IFolderSetZoneIdMode : IUnknown {
+    fn SetZoneIdMode(&self, zone_mode: i32 /* NZoneIdMode */) -> HRESULT;
+}
+
+#[interface_7zip(1, 0x13)]
 pub unsafe trait IFolderSetZoneIdFile : IUnknown {
     fn SetZoneIdFile(&self, data: *const u8, size: u32) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100140000")]
+#[interface_7zip(1, 0x14)]
 pub unsafe trait IFolderArchiveUpdateCallback_MoveArc : IUnknown {
     fn MoveArc_Start(&self, src_temp_path: *const wchar_t, dest_final_path: *const wchar_t, size: u64, update_mode: i32) -> HRESULT;
     fn MoveArc_Progress(&self, total_size: u64, current_size: u64) -> HRESULT;
@@ -94,15 +110,15 @@ pub unsafe trait IFolderArchiveUpdateCallback_MoveArc : IUnknown {
     fn Before_ArcReopen(&self) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100200000")]
+#[interface_7zip(1, 0x20)]
 pub unsafe trait IGetProp : IUnknown {
     fn GetProp(&self, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
 }
 
-#[interface("23170F69-40C1-278A-0000-000100310000")]
+#[interface_7zip(1, 0x31)]
 pub unsafe trait IFolderExtractToStreamCallback : IUnknown {
     fn UseExtractToStream(&self, res: *mut i32) -> HRESULT;
-    fn GetStream7(&self, name: *const wchar_t, is_dir: i32, out_stream: *mut *mut ISequentialOutStream, ask_extract_mode: i32, get_prop: *mut IGetProp) -> HRESULT;
+    fn GetStream7(&self, name: *const wchar_t, is_dir: i32, out_stream: OutRef<ISequentialOutStream>, ask_extract_mode: i32, get_prop: IGetProp) -> HRESULT;
     fn PrepareOperation7(&self, ask_extract_mode: i32) -> HRESULT;
     fn SetOperationResult8(&self, result_e_operation_result: i32, encrypted: i32, size: u64) -> HRESULT;
 }

@@ -4,12 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+from-to-repr = { version = "0.2", features = ["from_to_other"] }
 windows-core = { version = "0.62" }
+winunpack-macros = { path = "../winunpack-macros" }
 
 [dependencies.windows]
 version = "0.62"
 features = [
     "Win32_Foundation",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
     "Win32_System_Variant",
 ]

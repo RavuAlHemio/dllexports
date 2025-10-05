@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod coder;
+pub mod folder;
 pub mod folder_archive;
 pub mod progress;
 pub mod stream;
