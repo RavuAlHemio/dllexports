@@ -1,7 +1,8 @@
 use std::ffi::c_void;
+use std::ptr::null_mut;
 
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows_core::{Error, GUID, HRESULT, IUnknown, IUnknown_Vtbl};
+use windows_core::{Error, GUID, HRESULT, Interface, IUnknown, IUnknown_Vtbl, Type};
 use winunpack_macros::interface_7zip;
 
 use crate::z7_com::PROPID;
@@ -467,61 +468,281 @@ impl<T: ICompressInitEncoder_Impl> ICompressInitEncoder_Ext for T {
 
 #[interface_7zip(4, 0x37)]
 pub unsafe trait ICompressSetInStream2 : IUnknown {
-    fn SetInStream2(&self, stream_index: u32, in_stream: ISequentialInStream) -> HRESULT;
-    fn ReleaseInStream2(&self, stream_index: u32) -> HRESULT;
+    fn SetInStream2_Raw(&self, stream_index: u32, in_stream: ISequentialInStream) -> HRESULT;
+    fn ReleaseInStream2_Raw(&self, stream_index: u32) -> HRESULT;
+}
+
+pub trait ICompressSetInStream2_Ext {
+    fn SetInStream2(&self, stream_index: u32, in_stream: ISequentialInStream) -> Result<(), Error>;
+    fn ReleaseInStream2(&self, stream_index: u32) -> Result<(), Error>;
+}
+impl<T: ICompressSetInStream2_Impl> ICompressSetInStream2_Ext for T {
+    fn SetInStream2(&self, stream_index: u32, in_stream: ISequentialInStream) -> Result<(), Error> {
+        unsafe {
+            self.SetInStream2_Raw(stream_index, in_stream)
+                .ok()
+        }
+    }
+
+    fn ReleaseInStream2(&self, stream_index: u32) -> Result<(), Error> {
+        unsafe {
+            self.ReleaseInStream2_Raw(stream_index)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0x40)]
 pub unsafe trait ICompressFilter : IUnknown {
-    fn Init(&self) -> HRESULT;
-    fn Filter(&self, data: *mut u8, size: u32) -> u32;
+    fn Init_Raw(&self) -> HRESULT;
+    fn Filter_Raw(&self, data: *mut u8, size: u32) -> u32;
+}
+
+pub trait ICompressFilter_Ext {
+    fn Init(&self) -> Result<(), Error>;
+    fn Filter(&self, data: &mut [u8]) -> usize;
+}
+impl<T: ICompressFilter_Impl> ICompressFilter_Ext for T {
+    fn Init(&self) -> Result<(), Error> {
+        unsafe {
+            self.Init_Raw()
+                .ok()
+        }
+    }
+
+    fn Filter(&self, data: &mut [u8]) -> usize {
+        let size: u32 = data.len().try_into().unwrap();
+        let out_size = unsafe {
+            self.Filter_Raw(data.as_mut_ptr(), size)
+        };
+        out_size.try_into().unwrap()
+    }
 }
 
 #[interface_7zip(4, 0x60)]
 pub unsafe trait ICompressCodecsInfo : IUnknown {
-    fn GetNumMethods(&self, num_methods: *mut u32) -> HRESULT;
-    fn GetProperty(&self, index: u32, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
-    fn CreateDecoder(&self, index: u32, iid: *const GUID, coder: *mut *mut c_void) -> HRESULT;
-    fn CreateEncoder(&self, index: u32, iid: *const GUID, coder: *mut *mut c_void) -> HRESULT;
+    fn GetNumMethods_Raw(&self, num_methods: *mut u32) -> HRESULT;
+    fn GetProperty_Raw(&self, index: u32, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
+    fn CreateDecoder_Raw(&self, index: u32, iid: *const GUID, coder: *mut *mut c_void) -> HRESULT;
+    fn CreateEncoder_Raw(&self, index: u32, iid: *const GUID, coder: *mut *mut c_void) -> HRESULT;
+}
+
+pub trait ICompressCodecsInfo_Ext {
+    fn GetNumMethods(&self) -> Result<u32, Error>;
+    fn GetProperty(&self, index: u32, prop_id: PROPID) -> Result<PROPVARIANT, Error>;
+    fn CreateDecoder<U: Interface>(&self, index: u32, iid: GUID) -> Result<U, Error>;
+    fn CreateEncoder<U: Interface>(&self, index: u32, iid: GUID) -> Result<U, Error>;
+}
+impl<T: ICompressCodecsInfo_Impl> ICompressCodecsInfo_Ext for T {
+    fn GetNumMethods(&self) -> Result<u32, Error> {
+        let mut num_methods = 0;
+        unsafe {
+            self.GetNumMethods_Raw(&mut num_methods)
+                .map(|| num_methods)
+        }
+    }
+
+    fn GetProperty(&self, index: u32, prop_id: PROPID) -> Result<PROPVARIANT, Error> {
+        let mut value = PROPVARIANT::default();
+        unsafe {
+            self.GetProperty_Raw(index, prop_id, &mut value)
+                .map(|| value)
+        }
+    }
+
+    fn CreateDecoder<U: Interface>(&self, index: u32, iid: GUID) -> Result<U, Error> {
+        let mut ptr = null_mut();
+        unsafe {
+            self.CreateDecoder_Raw(index, &iid, &mut ptr)
+                .and_then(|| Type::from_abi(ptr))
+        }
+    }
+
+    fn CreateEncoder<U: Interface>(&self, index: u32, iid: GUID) -> Result<U, Error> {
+        let mut ptr = null_mut();
+        unsafe {
+            self.CreateEncoder_Raw(index, &iid, &mut ptr)
+                .and_then(|| Type::from_abi(ptr))
+        }
+    }
 }
 
 #[interface_7zip(4, 0x61)]
 pub unsafe trait ISetCompressCodecsInfo : IUnknown {
-    fn SetCompressCodecsInfo(&self, compress_codecs_info: ICompressCodecsInfo) -> HRESULT;
+    fn SetCompressCodecsInfo_Raw(&self, compress_codecs_info: ICompressCodecsInfo) -> HRESULT;
+}
+
+pub trait ISetCompressCodecsInfo_Ext {
+    fn SetCompressCodecsInfo(&self, compress_codecs_info: ICompressCodecsInfo) -> Result<(), Error>;
+}
+impl<T: ISetCompressCodecsInfo_Impl> ISetCompressCodecsInfo_Ext for T {
+    fn SetCompressCodecsInfo(&self, compress_codecs_info: ICompressCodecsInfo) -> Result<(), Error> {
+        unsafe {
+            self.SetCompressCodecsInfo_Raw(compress_codecs_info)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0x80)]
 pub unsafe trait ICryptoProperties : IUnknown {
-    fn SetKey(&self, data: *const u8, size: u32) -> HRESULT;
-    fn SetInitVector(&self, data: *const u8, size: u32) -> HRESULT;
+    fn SetKey_Raw(&self, data: *const u8, size: u32) -> HRESULT;
+    fn SetInitVector_Raw(&self, data: *const u8, size: u32) -> HRESULT;
+}
+
+pub trait ICryptoProperties_Ext {
+    fn SetKey(&self, data: &[u8]) -> Result<(), Error>;
+    fn SetInitVector(&self, data: &[u8]) -> Result<(), Error>;
+}
+impl<T: ICryptoProperties_Impl> ICryptoProperties_Ext for T {
+    fn SetKey(&self, data: &[u8]) -> Result<(), Error> {
+        let size: u32 = data.len().try_into().unwrap();
+        unsafe {
+            self.SetKey_Raw(data.as_ptr(), size)
+                .ok()
+        }
+    }
+
+    fn SetInitVector(&self, data: &[u8]) -> Result<(), Error> {
+        let size: u32 = data.len().try_into().unwrap();
+        unsafe {
+            self.SetInitVector_Raw(data.as_ptr(), size)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0x8C)]
 pub unsafe trait ICryptoResetInitVector : IUnknown {
-    fn ResetInitVector(&self) -> HRESULT;
+    fn ResetInitVector_Raw(&self) -> HRESULT;
+}
+
+pub trait ICryptoResetInitVector_Ext {
+    fn ResetInitVector(&self) -> Result<(), Error>;
+}
+impl<T: ICryptoResetInitVector_Impl> ICryptoResetInitVector_Ext for T {
+    fn ResetInitVector(&self) -> Result<(), Error> {
+        unsafe {
+            self.ResetInitVector_Raw()
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0x90)]
 pub unsafe trait ICryptoSetPassword : IUnknown {
-    fn CryptoSetPassword(&self) -> HRESULT;
+    fn CryptoSetPassword_Raw(&self, data: *const u8, size: u32) -> HRESULT;
+}
+
+pub trait ICryptoSetPassword_Ext {
+    fn CryptoSetPassword(&self, data: &[u8]) -> Result<(), Error>;
+}
+impl<T: ICryptoSetPassword_Impl> ICryptoSetPassword_Ext for T {
+    fn CryptoSetPassword(&self, data: &[u8]) -> Result<(), Error> {
+        let size: u32 = data.len().try_into().unwrap();
+        unsafe {
+            self.CryptoSetPassword_Raw(data.as_ptr(), size)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0xA0)]
 pub unsafe trait ICryptoSetCRC : IUnknown {
-    fn CryptoSetCRC(&self, crc: u32) -> HRESULT;
+    fn CryptoSetCRC_Raw(&self, crc: u32) -> HRESULT;
+}
+
+pub trait ICryptoSetCRC_Ext {
+    fn CryptoSetCRC(&self, crc: u32) -> Result<(), Error>;
+}
+impl<T: ICryptoSetCRC_Impl> ICryptoSetCRC_Ext for T {
+    fn CryptoSetCRC(&self, crc: u32) -> Result<(), Error> {
+        unsafe {
+            self.CryptoSetCRC_Raw(crc)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(4, 0xC0)]
 pub unsafe trait IHasher : IUnknown {
-    fn Init(&self) -> ();
-    fn Update(&self, data: *const c_void, size: u32);
-    fn Final(&self, digest: *mut u8);
+    fn Init_Raw(&self);
+    fn Update_Raw(&self, data: *const u8, size: u32);
+    fn Final_Raw(&self, digest: *mut u8);
+    fn GetDigestSize_Raw(&self) -> u32;
+}
+
+pub trait IHasher_Ext {
+    fn Init(&self);
+    fn Update(&self, data: &[u8]);
+    fn Final(&self, digest: &mut [u8]);
     fn GetDigestSize(&self) -> u32;
+}
+impl<T: IHasher_Impl> IHasher_Ext for T {
+    fn Init(&self) {
+        unsafe {
+            self.Init_Raw()
+        }
+    }
+
+    fn Update(&self, data: &[u8]) {
+        let size: u32 = data.len().try_into().unwrap();
+        unsafe {
+            self.Update_Raw(data.as_ptr(), size)
+        }
+    }
+
+    fn Final(&self, digest: &mut [u8]) {
+        let digest_size: usize = unsafe {
+            self.GetDigestSize_Raw()
+        }.try_into().unwrap();
+        if digest.len() < digest_size {
+            panic!("digest too small for this hasher");
+        }
+        unsafe {
+            self.Final_Raw(digest.as_mut_ptr())
+        }
+    }
+
+    fn GetDigestSize(&self) -> u32 {
+        unsafe {
+            self.GetDigestSize_Raw()
+        }
+    }
 }
 
 #[interface_7zip(4, 0xC1)]
 pub unsafe trait IHashers : IUnknown {
+    fn GetNumHashers_Raw(&self) -> u32;
+    fn GetHasherProp_Raw(&self, index: u32, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
+    fn CreateHasher_Raw(&self, index: u32, hasher: *mut *mut c_void) -> HRESULT;
+}
+
+pub trait IHashers_Ext {
     fn GetNumHashers(&self) -> u32;
-    fn GetHasherProp(&self, index: u32, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
-    fn CreateHasher(&self, index: u32, hasher: *mut *mut IHasher) -> HRESULT;
+    fn GetHasherProp(&self, index: u32, prop_id: PROPID) -> Result<PROPVARIANT, Error>;
+    fn CreateHasher(&self, index: u32) -> Result<IHasher, Error>;
+}
+impl<T: IHashers_Impl> IHashers_Ext for T {
+    fn GetNumHashers(&self) -> u32 {
+        unsafe {
+            self.GetNumHashers_Raw()
+        }
+    }
+
+    fn GetHasherProp(&self, index: u32, prop_id: PROPID) -> Result<PROPVARIANT, Error> {
+        let mut value = PROPVARIANT::default();
+        unsafe {
+            self.GetHasherProp_Raw(index, prop_id, &mut value)
+                .map(|| value)
+        }
+    }
+
+    fn CreateHasher(&self, index: u32) -> Result<IHasher, Error> {
+        let mut hasher = std::ptr::null_mut();
+        unsafe {
+            self.CreateHasher_Raw(index, &mut hasher)
+                .and_then(|| Type::from_abi(hasher))
+        }
+    }
 }

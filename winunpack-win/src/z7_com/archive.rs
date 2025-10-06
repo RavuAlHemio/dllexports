@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows_core::{Error, IUnknown, IUnknown_Vtbl, BSTR, HRESULT, Type};
+use windows_core::{BSTR, Error, HRESULT, IUnknown, IUnknown_Vtbl, Type};
 use winunpack_macros::interface_7zip;
 
 use crate::z7_com::{PROPID, VARTYPE, wchar_t};
@@ -577,6 +577,7 @@ impl<T: ISetProperties_Impl> ISetProperties_Ext for T {
         let mut values: Vec<PROPVARIANT> = Vec::with_capacity(num_props);
 
         for (n, v) in properties {
+            assert!(!n.contains('\u{00}'));
             let mut nu16: Vec<wchar_t> = n.encode_utf16()
                 .collect();
             nu16.push(0x0000);
@@ -646,17 +647,20 @@ pub unsafe trait IArchiveRequestMemoryUseCallback : IUnknown {
 pub trait IArchiveRequestMemoryUseCallback_Ext {
     fn RequestMemoryUse(
         &self,
-        flags: u32, index_type: u32, index: u32, path: String,
+        flags: u32, index_type: u32, index: u32, path: &str,
         required_size: u64,
     ) -> Result<MemoryUseRequestResult, Error>;
 }
 impl<T: IArchiveRequestMemoryUseCallback_Impl> IArchiveRequestMemoryUseCallback_Ext for T {
     fn RequestMemoryUse(
         &self,
-        flags: u32, index_type: u32, index: u32, path: String,
+        flags: u32, index_type: u32, index: u32, path: &str,
         required_size: u64,
     ) -> Result<MemoryUseRequestResult, Error> {
         let mut murr = MemoryUseRequestResult::default();
+
+        assert!(!path.contains('\u{00}'));
+
         let mut path_vec: Vec<u16> = path.encode_utf16().collect();
         path_vec.push(0x0000);
 
