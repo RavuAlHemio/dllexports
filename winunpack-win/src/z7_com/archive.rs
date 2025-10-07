@@ -4,7 +4,7 @@ use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows_core::{BSTR, Error, HRESULT, IUnknown, IUnknown_Vtbl, Type};
 use winunpack_macros::interface_7zip;
 
-use crate::z7_com::{PROPID, VARTYPE, wchar_t};
+use crate::z7_com::{PROPID, to_wide_nul_terminated_string, VARTYPE, wchar_t};
 use crate::z7_com::progress::{IProgress, IProgress_Impl, IProgress_Vtbl};
 use crate::z7_com::stream::{IInStream, ISequentialInStream, ISequentialOutStream};
 
@@ -577,11 +577,7 @@ impl<T: ISetProperties_Impl> ISetProperties_Ext for T {
         let mut values: Vec<PROPVARIANT> = Vec::with_capacity(num_props);
 
         for (n, v) in properties {
-            assert!(!n.contains('\u{00}'));
-            let mut nu16: Vec<wchar_t> = n.encode_utf16()
-                .collect();
-            nu16.push(0x0000);
-
+            let nu16 = to_wide_nul_terminated_string(n);
             names.push(nu16.as_ptr());
             name_values.push(nu16);
 
@@ -658,11 +654,7 @@ impl<T: IArchiveRequestMemoryUseCallback_Impl> IArchiveRequestMemoryUseCallback_
         required_size: u64,
     ) -> Result<MemoryUseRequestResult, Error> {
         let mut murr = MemoryUseRequestResult::default();
-
-        assert!(!path.contains('\u{00}'));
-
-        let mut path_vec: Vec<u16> = path.encode_utf16().collect();
-        path_vec.push(0x0000);
+        let path_vec = to_wide_nul_terminated_string(path);
 
         unsafe {
             self.RequestMemoryUse_Raw(

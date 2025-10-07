@@ -23,3 +23,11 @@ pub struct FILETIME {
     pub dwLowDateTime: u32,
     pub dwHighDateTime: u32,
 }
+
+
+pub fn to_wide_nul_terminated_string(s: &str) -> Vec<wchar_t> {
+    assert!(!s.contains('\u{00}'));
+    let mut words: Vec<wchar_t> = s.encode_utf16().collect();
+    words.push(0x0000);
+    words
+}

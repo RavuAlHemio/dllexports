@@ -3,10 +3,10 @@ use std::ptr::{null, null_mut};
 
 use from_to_repr::{from_to_other, FromToRepr};
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows_core::{Error, HRESULT, IUnknown, IUnknown_Vtbl, OutRef};
+use windows_core::{Error, HRESULT, IUnknown, IUnknown_Vtbl, Type};
 use winunpack_macros::interface_7zip;
 
-use crate::z7_com::{FILETIME, PROPID, wchar_t};
+use crate::z7_com::{FILETIME, PROPID, to_wide_nul_terminated_string, wchar_t};
 use crate::z7_com::folder::IFolderFolder;
 use crate::z7_com::progress::{IProgress, IProgress_Impl, IProgress_Vtbl};
 use crate::z7_com::stream::ISequentialOutStream;
@@ -46,14 +46,8 @@ impl<T: IFolderArchiveExtractCallback_Impl> IFolderArchiveExtractCallback_Ext fo
         exist_name: &str, exist_time: FILETIME, exist_size: u64,
         new_name: &str, new_time: FILETIME, new_size: u64,
     ) -> Result<i32, Error> {
-        assert!(!exist_name.contains('\u{00}'));
-        assert!(!new_name.contains('\u{00}'));
-
-        let mut exist_name_w: Vec<wchar_t> = exist_name.encode_utf16().collect();
-        exist_name_w.push(0x0000);
-
-        let mut new_name_w: Vec<wchar_t> = new_name.encode_utf16().collect();
-        new_name_w.push(0x0000);
+        let exist_name_w = to_wide_nul_terminated_string(&exist_name);
+        let new_name_w = to_wide_nul_terminated_string(&new_name);
 
         let mut answer = 0;
         unsafe {
@@ -67,10 +61,7 @@ impl<T: IFolderArchiveExtractCallback_Impl> IFolderArchiveExtractCallback_Ext fo
     }
 
     fn PrepareOperation(&self, name: &str, is_folder: i32, ask_extract_mode: i32, position: u64) -> Result<(), Error> {
-        assert!(!name.contains('\u{00}'));
-
-        let mut name_w: Vec<wchar_t> = name.encode_utf16().collect();
-        name_w.push(0x0000);
+        let name_w: Vec<wchar_t> = to_wide_nul_terminated_string(name);
 
         unsafe {
             self.PrepareOperation_Raw(name_w.as_ptr(), is_folder, ask_extract_mode, &position)
@@ -79,10 +70,7 @@ impl<T: IFolderArchiveExtractCallback_Impl> IFolderArchiveExtractCallback_Ext fo
     }
 
     fn MessageError(&self, message: &str) -> Result<(), Error> {
-        assert!(!message.contains('\u{00}'));
-
-        let mut message_w: Vec<wchar_t> = message.encode_utf16().collect();
-        message_w.push(0x0000);
+        let message_w: Vec<wchar_t> = to_wide_nul_terminated_string(message);
 
         unsafe {
             self.MessageError_Raw(message_w.as_ptr())
@@ -108,9 +96,7 @@ pub trait IFolderArchiveExtractCallback2_Ext {
 }
 impl<T: IFolderArchiveExtractCallback2_Impl> IFolderArchiveExtractCallback2_Ext for T {
     fn ReportExtractResult(&self, op_res: i32, encrypted: i32, name: &str) -> Result<(), Error> {
-        assert!(!name.contains('\u{00}'));
-        let mut name_w: Vec<wchar_t> = name.encode_utf16().collect();
-        name_w.push(0x0000);
+        let name_w = to_wide_nul_terminated_string(name);
 
         unsafe {
             self.ReportExtractResult_Raw(op_res, encrypted, name_w.as_ptr())
@@ -137,9 +123,7 @@ pub trait IFolderArchiveUpdateCallback_Ext {
 }
 impl<T: IFolderArchiveUpdateCallback_Impl> IFolderArchiveUpdateCallback_Ext for T {
     fn CompressOperation(&self, name: &str) -> Result<(), Error> {
-        assert!(!name.contains('\u{00}'));
-        let mut name_w: Vec<u16> = name.encode_utf16().collect();
-        name_w.push(0x0000);
+        let name_w = to_wide_nul_terminated_string(name);
 
         unsafe {
             self.CompressOperation_Raw(name_w.as_ptr())
@@ -148,9 +132,7 @@ impl<T: IFolderArchiveUpdateCallback_Impl> IFolderArchiveUpdateCallback_Ext for 
     }
 
     fn DeleteOperation(&self, name: &str) -> Result<(), Error> {
-        assert!(!name.contains('\u{00}'));
-        let mut name_w: Vec<u16> = name.encode_utf16().collect();
-        name_w.push(0x0000);
+        let name_w = to_wide_nul_terminated_string(name);
 
         unsafe {
             self.DeleteOperation_Raw(name_w.as_ptr())
@@ -166,9 +148,7 @@ impl<T: IFolderArchiveUpdateCallback_Impl> IFolderArchiveUpdateCallback_Ext for 
     }
 
     fn UpdateErrorMessage(&self, message: &str) -> Result<(), Error> {
-        assert!(!message.contains('\u{00}'));
-        let mut message_w: Vec<u16> = message.encode_utf16().collect();
-        message_w.push(0x0000);
+        let message_w = to_wide_nul_terminated_string(message);
 
         unsafe {
             self.UpdateErrorMessage_Raw(message_w.as_ptr())
@@ -257,16 +237,11 @@ impl<T: IOutFolderArchive_Impl> IOutFolderArchive_Ext for T {
     }
 
     fn SetFiles(&self, folder_prefix: &str, names: &[&str]) -> Result<(), Error> {
-        assert!(!folder_prefix.contains('\u{00}'));
-        assert!(names.iter().all(|n| !n.contains('\u{00}')));
-
-        let mut folder_prefix_w: Vec<wchar_t> = folder_prefix.encode_utf16().collect();
-        folder_prefix_w.push(0x0000);
+        let folder_prefix_w = to_wide_nul_terminated_string(&folder_prefix);
 
         let mut names_w = Vec::with_capacity(names.len());
         for name in names {
-            let mut name_w: Vec<u16> = name.encode_utf16().collect();
-            name_w.push(0x0000);
+            let name_w = to_wide_nul_terminated_string(name);
             names_w.push(name_w);
         }
 
@@ -299,13 +274,11 @@ impl<T: IOutFolderArchive_Impl> IOutFolderArchive_Ext for T {
         out_archive_stream: ISequentialOutStream, state_actions: &[PairAction], sfx_module: Option<&str>,
         update_callback: IFolderArchiveUpdateCallback,
     ) -> Result<(), Error> {
-        assert!(!sfx_module.map(|sm| sm.contains('\u{00}')).unwrap_or(false));
         assert_eq!(state_actions.len(), PAIR_STATE_VALUES);
 
-        let mut sfx_module_w: Vec<wchar_t>;
+        let sfx_module_w: Vec<wchar_t>;
         let sfx_module_ptr = if let Some(sm) = sfx_module {
-            sfx_module_w = sm.encode_utf16().collect();
-            sfx_module_w.push(0x0000);
+            sfx_module_w = to_wide_nul_terminated_string(sm);
             sfx_module_w.as_ptr()
         } else {
             null()
@@ -346,10 +319,7 @@ pub trait IFolderArchiveUpdateCallback2_Ext {
 }
 impl<T: IFolderArchiveUpdateCallback2_Impl> IFolderArchiveUpdateCallback2_Ext for T {
     fn OpenFileError(&self, path: &str, error_code: HRESULT) -> Result<(), Error> {
-        assert!(!path.contains('\u{00}'));
-
-        let mut path_w: Vec<u16> = path.encode_utf16().collect();
-        path_w.push(0x0000);
+        let path_w = to_wide_nul_terminated_string(path);
 
         unsafe {
             self.OpenFileError_Raw(path_w.as_ptr(), error_code)
@@ -358,10 +328,7 @@ impl<T: IFolderArchiveUpdateCallback2_Impl> IFolderArchiveUpdateCallback2_Ext fo
     }
 
     fn ReadingFileError(&self, path: &str, error_code: HRESULT) -> Result<(), Error> {
-        assert!(!path.contains('\u{00}'));
-
-        let mut path_w: Vec<u16> = path.encode_utf16().collect();
-        path_w.push(0x0000);
+        let path_w = to_wide_nul_terminated_string(path);
 
         unsafe {
             self.ReadingFileError_Raw(path_w.as_ptr(), error_code)
@@ -370,10 +337,7 @@ impl<T: IFolderArchiveUpdateCallback2_Impl> IFolderArchiveUpdateCallback2_Ext fo
     }
 
     fn ReportExtractResult(&self, op_res: i32, is_encrypted: i32, path: &str) -> Result<(), Error> {
-        assert!(!path.contains('\u{00}'));
-
-        let mut path_w: Vec<u16> = path.encode_utf16().collect();
-        path_w.push(0x0000);
+        let path_w = to_wide_nul_terminated_string(path);
 
         unsafe {
             self.ReportExtractResult_Raw(op_res, is_encrypted, path_w.as_ptr())
@@ -382,10 +346,7 @@ impl<T: IFolderArchiveUpdateCallback2_Impl> IFolderArchiveUpdateCallback2_Ext fo
     }
 
     fn ReportUpdateOperation(&self, notify_op: i32, path: &str, is_dir: i32) -> Result<(), Error> {
-        assert!(!path.contains('\u{00}'));
-
-        let mut path_w: Vec<u16> = path.encode_utf16().collect();
-        path_w.push(0x0000);
+        let path_w = to_wide_nul_terminated_string(path);
 
         unsafe {
             self.ReportUpdateOperation_Raw(notify_op, path_w.as_ptr(), is_dir)
@@ -396,8 +357,32 @@ impl<T: IFolderArchiveUpdateCallback2_Impl> IFolderArchiveUpdateCallback2_Ext fo
 
 #[interface_7zip(1, 0x11)]
 pub unsafe trait IFolderScanProgress : IUnknown {
-    fn ScanError(&self, path: *const wchar_t, error_code: HRESULT) -> HRESULT;
-    fn ScanProgress(&self, num_folders: u64, num_files: u64, total_size: u64, path: *const wchar_t, is_dir: i32) -> HRESULT;
+    fn ScanError_Raw(&self, path: *const wchar_t, error_code: HRESULT) -> HRESULT;
+    fn ScanProgress_Raw(&self, num_folders: u64, num_files: u64, total_size: u64, path: *const wchar_t, is_dir: i32) -> HRESULT;
+}
+
+pub trait IFolderScanProgress_Ext {
+    fn ScanError(&self, path: &str, error_code: HRESULT) -> Result<(), Error>;
+    fn ScanProgress(&self, num_folders: u64, num_files: u64, total_size: u64, path: &str, is_dir: i32) -> Result<(), Error>;
+}
+impl<T: IFolderScanProgress_Impl> IFolderScanProgress_Ext for T {
+    fn ScanError(&self, path: &str, error_code: HRESULT) -> Result<(), Error> {
+        let path_w = to_wide_nul_terminated_string(path);
+
+        unsafe {
+            self.ScanError_Raw(path_w.as_ptr(), error_code)
+                .ok()
+        }
+    }
+
+    fn ScanProgress(&self, num_folders: u64, num_files: u64, total_size: u64, path: &str, is_dir: i32) -> Result<(), Error> {
+        let path_w = to_wide_nul_terminated_string(path);
+
+        unsafe {
+            self.ScanProgress_Raw(num_folders, num_files, total_size, path_w.as_ptr(), is_dir)
+                .ok()
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -411,31 +396,149 @@ pub enum NZoneIdMode {
 
 #[interface_7zip(1, 0x12)]
 pub unsafe trait IFolderSetZoneIdMode : IUnknown {
-    fn SetZoneIdMode(&self, zone_mode: i32 /* NZoneIdMode */) -> HRESULT;
+    fn SetZoneIdMode_Raw(&self, zone_mode: i32 /* NZoneIdMode */) -> HRESULT;
+}
+
+pub trait IFolderSetZoneIdMode_Ext {
+    fn SetZoneIdMode(&self, zone_mode: NZoneIdMode) -> Result<(), Error>;
+}
+impl<T: IFolderSetZoneIdMode_Impl> IFolderSetZoneIdMode_Ext for T {
+    fn SetZoneIdMode(&self, zone_mode: NZoneIdMode) -> Result<(), Error> {
+        let zone_mode_i32 = zone_mode.to_base_type();
+        unsafe {
+            self.SetZoneIdMode_Raw(zone_mode_i32)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(1, 0x13)]
 pub unsafe trait IFolderSetZoneIdFile : IUnknown {
-    fn SetZoneIdFile(&self, data: *const u8, size: u32) -> HRESULT;
+    fn SetZoneIdFile_Raw(&self, data: *const u8, size: u32) -> HRESULT;
+}
+
+pub trait IFolderSetZoneIdFile_Ext {
+    fn SetZoneIdMode(&self, data: &[u8]) -> Result<(), Error>;
+}
+impl<T: IFolderSetZoneIdFile_Impl> IFolderSetZoneIdFile_Ext for T {
+    fn SetZoneIdMode(&self, data: &[u8]) -> Result<(), Error> {
+        let size: u32 = data.len().try_into().unwrap();
+        unsafe {
+            self.SetZoneIdFile_Raw(data.as_ptr(), size)
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(1, 0x14)]
 pub unsafe trait IFolderArchiveUpdateCallback_MoveArc : IUnknown {
-    fn MoveArc_Start(&self, src_temp_path: *const wchar_t, dest_final_path: *const wchar_t, size: u64, update_mode: i32) -> HRESULT;
-    fn MoveArc_Progress(&self, total_size: u64, current_size: u64) -> HRESULT;
-    fn MoveArc_Finish(&self) -> HRESULT;
-    fn Before_ArcReopen(&self) -> HRESULT;
+    fn MoveArc_Start_Raw(&self, src_temp_path: *const wchar_t, dest_final_path: *const wchar_t, size: u64, update_mode: i32) -> HRESULT;
+    fn MoveArc_Progress_Raw(&self, total_size: u64, current_size: u64) -> HRESULT;
+    fn MoveArc_Finish_Raw(&self) -> HRESULT;
+    fn Before_ArcReopen_Raw(&self) -> HRESULT;
+}
+
+pub trait IFolderArchiveUpdateCallback_MoveArc_Ext {
+    fn MoveArc_Start(&self, src_temp_path: &str, dest_final_path: &str, size: u64, update_mode: i32) -> Result<(), Error>;
+    fn MoveArc_Progress(&self, total_size: u64, current_size: u64) -> Result<(), Error>;
+    fn MoveArc_Finish(&self) -> Result<(), Error>;
+    fn Before_ArcReopen(&self) -> Result<(), Error>;
+}
+impl<T: IFolderArchiveUpdateCallback_MoveArc_Impl> IFolderArchiveUpdateCallback_MoveArc_Ext for T {
+    fn MoveArc_Start(&self, src_temp_path: &str, dest_final_path: &str, size: u64, update_mode: i32) -> Result<(), Error> {
+        let src_temp_path_w = to_wide_nul_terminated_string(src_temp_path);
+        let dest_final_path_w = to_wide_nul_terminated_string(dest_final_path);
+
+        unsafe {
+            self.MoveArc_Start_Raw(src_temp_path_w.as_ptr(), dest_final_path_w.as_ptr(), size, update_mode)
+                .ok()
+        }
+    }
+
+    fn MoveArc_Progress(&self, total_size: u64, current_size: u64) -> Result<(), Error> {
+        unsafe {
+            self.MoveArc_Progress_Raw(total_size, current_size)
+                .ok()
+        }
+    }
+
+    fn MoveArc_Finish(&self) -> Result<(), Error> {
+        unsafe {
+            self.MoveArc_Finish_Raw()
+                .ok()
+        }
+    }
+
+    fn Before_ArcReopen(&self) -> Result<(), Error> {
+        unsafe {
+            self.Before_ArcReopen_Raw()
+                .ok()
+        }
+    }
 }
 
 #[interface_7zip(1, 0x20)]
 pub unsafe trait IGetProp : IUnknown {
-    fn GetProp(&self, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
+    fn GetProp_Raw(&self, prop_id: PROPID, value: *mut PROPVARIANT) -> HRESULT;
+}
+
+pub trait IGetProp_Ext {
+    fn GetProp(&self, prop_id: PROPID) -> Result<PROPVARIANT, Error>;
+}
+impl<T: IGetProp_Impl> IGetProp_Ext for T {
+    fn GetProp(&self, prop_id: PROPID) -> Result<PROPVARIANT, Error> {
+        let mut value = PROPVARIANT::default();
+        unsafe {
+            self.GetProp_Raw(prop_id, &mut value)
+                .map(|| value)
+        }
+    }
 }
 
 #[interface_7zip(1, 0x31)]
 pub unsafe trait IFolderExtractToStreamCallback : IUnknown {
-    fn UseExtractToStream(&self, res: *mut i32) -> HRESULT;
-    fn GetStream7(&self, name: *const wchar_t, is_dir: i32, out_stream: OutRef<ISequentialOutStream>, ask_extract_mode: i32, get_prop: IGetProp) -> HRESULT;
-    fn PrepareOperation7(&self, ask_extract_mode: i32) -> HRESULT;
-    fn SetOperationResult8(&self, result_e_operation_result: i32, encrypted: i32, size: u64) -> HRESULT;
+    fn UseExtractToStream_Raw(&self, res: *mut i32) -> HRESULT;
+    fn GetStream7_Raw(&self, name: *const wchar_t, is_dir: i32, out_stream: *mut *mut c_void, ask_extract_mode: i32, get_prop: IGetProp) -> HRESULT;
+    fn PrepareOperation7_Raw(&self, ask_extract_mode: i32) -> HRESULT;
+    fn SetOperationResult8_Raw(&self, result_e_operation_result: i32, encrypted: i32, size: u64) -> HRESULT;
+}
+
+pub trait IFolderExtractToStreamCallback_Ext {
+    fn UseExtractToStream(&self) -> Result<i32, Error>;
+    fn GetStream7(&self, name: &str, is_dir: i32, ask_extract_mode: i32, get_prop: IGetProp) -> Result<ISequentialOutStream, Error>;
+    fn PrepareOperation7(&self, ask_extract_mode: i32) -> Result<(), Error>;
+    fn SetOperationResult8(&self, result_e_operation_result: i32, encrypted: i32, size: u64) -> Result<(), Error>;
+}
+impl<T: IFolderExtractToStreamCallback_Impl> IFolderExtractToStreamCallback_Ext for T {
+    fn UseExtractToStream(&self) -> Result<i32, Error> {
+        let mut res = 0;
+        unsafe {
+            self.UseExtractToStream_Raw(&mut res)
+                .map(|| res)
+        }
+    }
+
+    fn GetStream7(&self, name: &str, is_dir: i32, ask_extract_mode: i32, get_prop: IGetProp) -> Result<ISequentialOutStream, Error> {
+        let name_w = to_wide_nul_terminated_string(name);
+
+        let mut out_stream_raw = std::ptr::null_mut();
+        unsafe {
+            self.GetStream7_Raw(name_w.as_ptr(), is_dir, &mut out_stream_raw, ask_extract_mode, get_prop)
+                .and_then(|| Type::from_abi(out_stream_raw))
+        }
+    }
+
+    fn PrepareOperation7(&self, ask_extract_mode: i32) -> Result<(), Error> {
+        unsafe {
+            self.PrepareOperation7_Raw(ask_extract_mode)
+                .ok()
+        }
+    }
+
+    fn SetOperationResult8(&self, result_e_operation_result: i32, encrypted: i32, size: u64) -> Result<(), Error> {
+        unsafe {
+            self.SetOperationResult8_Raw(result_e_operation_result, encrypted, size)
+                .ok()
+        }
+    }
 }
