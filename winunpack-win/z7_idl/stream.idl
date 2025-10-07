@@ -1,0 +1,146 @@
+#include "macros.cm"
+
+#define Z7_STREAM_GUID(n) Z7_GUID(03, n)
+
+import "oaidl.idl", "propidl.idl";
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(01)),
+    pointer_default(unique),
+]
+interface ISequentialInStream : IUnknown
+{
+    HRESULT Read(
+        [in, size_is(size)] byte *data,
+        [in] UInt32 size,
+        [out, retval] UInt32 *processedSize);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(02)),
+    pointer_default(unique),
+]
+interface ISequentialOutStream : IUnknown
+{
+    HRESULT Write(
+        [in, size_is(size)] const byte *data,
+        [in] UInt32 size,
+        [out, retval] UInt32 *processedSize);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(03)),
+    pointer_default(unique),
+]
+interface IInStream : ISequentialInStream
+{
+    HRESULT Seek(
+        [in] Int64 offset,
+        [in] UInt32 seekOrigin,
+        [out, retval] UInt64 *newPosition);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(04)),
+    pointer_default(unique),
+]
+interface IOutStream : ISequentialOutStream
+{
+    HRESULT Seek(
+        [in] Int64 offset,
+        [in] UInt32 seekOrigin,
+        [out, retval] UInt64 *newPosition);
+
+    HRESULT SetSize(
+        [in] UInt64 newSize);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(06)),
+    pointer_default(unique),
+]
+interface IStreamGetSize : IUnknown
+{
+    HRESULT GetSize(
+        [out, retval] UInt64 *size);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(07)),
+    pointer_default(unique),
+]
+interface IOutStreamFinish : IUnknown
+{
+    HRESULT OutStreamFinish();
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(08)),
+    pointer_default(unique),
+]
+interface IStreamGetProps : IUnknown
+{
+    HRESULT GetProps(
+        [out] UInt64 *size,
+        [out] FILETIME *cTime,
+        [out] FILETIME *aTime,
+        [out] FILETIME *mTime,
+        [out] UInt32 *attrib);
+}
+
+typedef struct
+{
+    UInt64 Size;
+    UInt64 VolID;
+    UInt64 FileID_Low;
+    UInt64 FileID_High;
+    UInt32 NumLinks;
+    UInt32 Attrib;
+    FILETIME CTime;
+    FILETIME ATime;
+    FILETIME MTime;
+} CStreamFileProps;
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(09)),
+    pointer_default(unique),
+]
+interface IStreamGetProps2 : IUnknown
+{
+    HRESULT GetProps2(
+        [out, retval] CStreamFileProps *props);
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(0A)),
+    pointer_default(unique),
+]
+interface IStreamGetProp : IUnknown
+{
+    HRESULT GetProperty(
+        [in] PROPID propID,
+        [out, retval] PROPVARIANT *value);
+
+    HRESULT ReloadProps();
+}
+
+[
+    object,
+    uuid(Z7_STREAM_GUID(10)),
+    pointer_default(unique),
+]
+interface IStreamSetRestriction : IUnknown
+{
+    HRESULT SetRestriction(
+        [in] UInt64 begin,
+        [in] UInt64 end);
+}

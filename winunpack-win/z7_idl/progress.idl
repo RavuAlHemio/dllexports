@@ -1,0 +1,17 @@
+#include "macros.cm"
+
+import "oaidl.idl";
+
+[
+    object,
+    uuid(Z7_GUID(00, 05)),
+    pointer_default(unique),
+]
+interface IProgress : IUnknown
+{
+    HRESULT SetTotal(
+        [in] UInt64 total);
+
+    HRESULT SetCompleted(
+        [in] const UInt64 *completeValue);
+}

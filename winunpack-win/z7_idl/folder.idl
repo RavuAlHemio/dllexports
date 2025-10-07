@@ -1,0 +1,353 @@
+#include "macros.cm"
+
+#define Z7_FOLDER_GUID(n) Z7_GUID(08, n)
+
+import "oaidl.idl", "propidl.idl";
+import "progress.idl", "stream.idl";
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(00)),
+    pointer_default(unique),
+]
+interface IFolderFolder : IUnknown
+{
+    HRESULT LoadItems();
+
+    HRESULT GetNumberOfItems(
+        [out, retval] UInt32 *numItems);
+
+    HRESULT GetProperty(
+        [in] UInt32 itemIndex,
+        [in] PROPID propID,
+        [out, retval] PROPVARIANT *value);
+
+    HRESULT BindToFolderByIndex(
+        [in] UInt32 index,
+        [out, retval] IFolderFolder **resultFolder);
+
+    HRESULT BindToFolderByName(
+        [in, string] const wchar_t *name,
+        [out, retval] IFolderFolder **resultFolder);
+
+    HRESULT BindToParentFolder(
+        [out, retval] IFolderFolder **resultFolder);
+
+    HRESULT GetNumberOfProperties(
+        [out, retval] UInt32 *numProperties);
+
+    HRESULT GetPropertyInfo(
+        [in] UInt32 index,
+        [out, string] BSTR *name,
+        [out] PROPID *propID,
+        [out] VARTYPE *varType);
+
+    HRESULT GetFolderProperty(
+        [in] PROPID propID,
+        [out, retval] PROPVARIANT *value);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(17)),
+    pointer_default(unique),
+]
+interface IFolderAltStreams : IUnknown
+{
+    HRESULT BindToAltStreamsByIndex(
+        [in] UInt32 index,
+        [out, retval] IFolderFolder **resultFolder);
+
+    HRESULT BindToAltStreamsByName(
+        [in, string] const wchar_t *name,
+        [out, retval] IFolderFolder **resultFolder);
+
+    HRESULT AreAltStreamsSupported(
+        [in] UInt32 index,
+        [out, retval] Int32 *isSupported);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(04)),
+    pointer_default(unique),
+]
+interface IFolderWasChanged : IUnknown
+{
+    HRESULT WasChanged(
+        [out, retval] Int32 *wasChanged);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(0B)),
+    pointer_default(unique),
+]
+interface IFolderOperationsExtractCallback : IProgress
+{
+    HRESULT AskWrite(
+        [in, string] const wchar_t *srcPath,
+        [in] Int32 srcIsFolder,
+        [in] const FILETIME *srcTime,
+        [in] const UInt64 *srcSize,
+        [in, string] const wchar_t *destPathRequest,
+        [out, string] BSTR *destPathResult,
+        [out, retval] Int32 *writeAnswer);
+
+    HRESULT ShowMessage(
+        [in, string] const wchar_t *message);
+
+    HRESULT SetCurrentFilePath(
+        [in, string] const wchar_t *filePath);
+
+    HRESULT SetNumFiles(
+        [in] UInt64 numFiles);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(13)),
+    pointer_default(unique),
+]
+interface IFolderOperations : IProgress
+{
+    HRESULT CreateFolder(
+        [in, string] const wchar_t *name,
+        [in] IProgress *progress);
+
+    HRESULT CreateFile(
+        [in, string] const wchar_t *message,
+        [in] IProgress *progress);
+
+    HRESULT Rename(
+        [in] UInt32 index,
+        [in, string] const wchar_t *newName,
+        [in] IProgress *progress);
+
+    HRESULT Delete(
+        [in, size_is(numItems)] const UInt32 *indices,
+        [in] UInt32 numItems,
+        [in] IProgress *progress);
+
+    HRESULT CopyTo(
+        [in] Int32 moveMode,
+        [in, size_is(numItems)] const UInt32 *indices,
+        [in] UInt32 numItems,
+        [in] Int32 includeAltStreams,
+        [in] Int32 replaceAltStreamCharsMode,
+        [in, string] const wchar_t *path,
+        [in] IFolderOperationsExtractCallback *callback);
+
+    HRESULT CopyFrom(
+        [in] Int32 moveMode,
+        [in, string] const wchar_t *fromFolderPath,
+        [in, string, size_is(numItems)] const wchar_t * const *itemsPaths,
+        [in] UInt32 numItems,
+        [in] IProgress *progress);
+
+    HRESULT SetProperty(
+        [in] UInt32 index,
+        [in] PROPID propID,
+        [in] const PROPVARIANT *value,
+        [in] IProgress *progress);
+
+    HRESULT CopyFromFile(
+        [in] UInt32 index,
+        [in, string] const wchar_t *fullFilePath,
+        [in] IProgress *progress);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(07)),
+    pointer_default(unique),
+]
+interface IFolderGetSystemIconIndex : IProgress
+{
+    HRESULT GetSystemIconIndex(
+        [in] UInt32 index,
+        [out, retval] Int32 *iconIndex);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(08)),
+    pointer_default(unique),
+]
+interface IFolderGetItemFullSize : IProgress
+{
+    HRESULT GetItemFullSize(
+        [in] UInt32 index,
+        [out] PROPVARIANT *value,
+        [in] IProgress *progress);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(14)),
+    pointer_default(unique),
+]
+interface IFolderCalcItemFullSize : IProgress
+{
+    HRESULT CalcItemFullSize(
+        [in] UInt32 index,
+        [in] IProgress *progress);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(09)),
+    pointer_default(unique),
+]
+interface IFolderClone : IProgress
+{
+    HRESULT Clone(
+        [out, retval] IFolderFolder **resultFolder);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(0A)),
+    pointer_default(unique),
+]
+interface IFolderSetFlatMode : IProgress
+{
+    HRESULT SetFlatMode(
+        [in] Int32 flatMode);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(0E)),
+    pointer_default(unique),
+]
+interface IFolderProperties : IProgress
+{
+    HRESULT GetNumberOfFolderProperties(
+        [out, retval] UInt32 *numProperties);
+
+    HRESULT GetFolderPropertyInfo(
+        [in] UInt32 index,
+        [out, string] BSTR *name,
+        [out] PROPID *propID,
+        [out] VARTYPE *varType);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(10)),
+    pointer_default(unique),
+]
+interface IFolderArcProps : IProgress
+{
+    HRESULT GetArcNumLevels(
+        [out, retval] UInt32 *numLevels);
+
+    HRESULT GetArcProp(
+        [in] UInt32 level,
+        [in] PROPID propID,
+        [out, retval] PROPVARIANT *value);
+
+    HRESULT GetArcNumProps(
+        [in] UInt32 level,
+        [out, retval] UInt32 *numProps);
+
+    HRESULT GetArcPropInfo(
+        [in] UInt32 level,
+        [in] UInt32 index,
+        [out, string] BSTR *name,
+        [out] PROPID *propID,
+        [out] VARTYPE *varType);
+
+    HRESULT GetArcProp2(
+        [in] UInt32 level,
+        [in] PROPID propID,
+        [out, retval] PROPVARIANT *value);
+
+    HRESULT GetArcNumProps2(
+        [in] UInt32 level,
+        [out, retval] UInt32 *numProps);
+
+    HRESULT GetArcPropInfo2(
+        [in] UInt32 level,
+        [in] UInt32 index,
+        [out, string] BSTR *name,
+        [out] PROPID *propID,
+        [out] VARTYPE *varType);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(11)),
+    pointer_default(unique),
+]
+interface IGetFolderArcProps : IProgress
+{
+    HRESULT GetFolderArcProps(
+        [out, retval] IFolderArcProps **object);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(15)),
+    pointer_default(unique),
+]
+interface IFolderCompare : IProgress
+{
+    [
+        local,
+    ]
+    Int32 CompareItems(
+        [in] UInt32 index1,
+        [in] UInt32 index2,
+        [in] PROPID propID,
+        [in] Int32 propIsRaw);
+}
+
+[
+    object,
+    uuid(Z7_FOLDER_GUID(16)),
+    pointer_default(unique),
+]
+interface IFolderGetItemName : IProgress
+{
+    HRESULT GetItemName(
+        [in] UInt32 index,
+        [out, string /*, size_is(*len)*/ ] /* const */ wchar_t **name,
+        [out] unsigned int *len);
+
+    HRESULT GetItemPrefix(
+        [in] UInt32 index,
+        [out, string /*, size_is(*len)*/ ] /* const */ wchar_t **name,
+        [out] unsigned int *len);
+
+    [
+        local,
+    ]
+    UInt64 GetItemSize(
+        [in] UInt32 index);
+}
+
+[
+    object,
+    /* warning: section 9 */
+    uuid(Z7_GUID(09, 05)),
+    pointer_default(unique),
+]
+interface IFolderManager : IProgress
+{
+    HRESULT OpenFolderFile(
+        [in] IInStream *inStream,
+        [in, string] const wchar_t *filePath,
+        [in, string] const wchar_t *arcFormat,
+        [out] IFolderFolder **resultFolder,
+        [in] IProgress *progress);
+
+    HRESULT GetExtensions(
+        [out, retval, string] BSTR *extensions);
+
+    HRESULT GetIconPath(
+        [in, string] const wchar_t *ext,
+        [out, string] BSTR *iconPath,
+        [out] Int32 *iconIndex);
+}
