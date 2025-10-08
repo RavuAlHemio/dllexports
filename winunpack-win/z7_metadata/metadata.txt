@@ -1,0 +1,114 @@
+meta	IgorPavlov.SevenZip	0:0:0:0
+dll	7z.dll
+
+fptr	Func_IsArc	uint32	0
+arg	in	p	uint8	1
+arg	in	size	size_t	0
+
+fn	CreateDecoder	HRESULT	0
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	outObject	void	2	com_out
+
+fn	CreateEncoder	HRESULT	0
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	outObject	void	2	com_out
+
+fn	CreateObject	HRESULT	0
+arg	in	clsid	GUID	1	const
+arg	in	iid	GUID	1	const
+arg	in	outObject	void	2	com_out
+
+fn	GetHandlerProperty	HRESULT	0
+arg	in	propID	PROPID	0	const
+arg	out	val	PROPVARIANT	1
+
+fn	GetHandlerProperty2	HRESULT	0
+arg	in	formatIndex	uint32	0
+arg	in	propID	PROPID	0
+arg	out	val	PROPVARIANT	1
+
+fn	GetHashers	HRESULT	0
+arg	out	hashers	IHashers	2
+
+fn	GetIsArc	HRESULT	0
+arg	in	formatIndex	uint32	0
+arg	out	isArc	Func_IsArc	1
+
+fn	GetMethodProperty	HRESULT	0
+arg	in	codecIndex	uint32	0
+arg	in	propID	PROPID	0
+arg	out	val	PROPVARIANT	1
+
+fn	GetModuleProp	HRESULT	0
+arg	in	propID	PROPID	0
+arg	out	val	PROPVARIANT	1
+
+fn	GetNumberOfFormats	HRESULT	0
+arg	out	numFormats	uint32	1
+
+fn	GetNumberOfMethods	HRESULT	0
+arg	out	numCodecs	uint32	1
+
+fn	SetCaseSensitive	HRESULT	0
+arg	in	caseSensitive	BOOL	1
+
+fn	SetCodecs	HRESULT	0
+arg	in	compressCodecsInfo	ICompressCodecsInfo	1
+
+fn	SetLargePageMode	HRESULT	0
+
+iface	IProgress	0	5	IUnknown
+
+meth	SetTotal	HRESULT	0
+arg	in	total	uint64	0
+
+meth	SetCompleted	HRESULT	0
+arg	in	completeValue	uint64	1	const
+
+iface	ICompressCodecsInfo	4	96	IUnknown
+
+meth	GetNumMethods	HRESULT	0
+arg	out	numMethods	uint32	1
+
+meth	GetProperty	HRESULT	0
+arg	in	index	uint32	0
+arg	in	propID	PROPID	0
+arg	out	value	PROPVARIANT	1
+
+meth	CreateDecoder	HRESULT	0
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	coder	void	2	com_out
+
+meth	CreateEncoder	HRESULT	0
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	coder	void	2	com_out
+
+iface	IHashers	4	193	IUnknown
+
+meth	GetNumHashers	uint32	0
+
+meth	GetHasherProp	HRESULT	0
+arg	in	index	uint32	0
+arg	in	propID	PROPID	0
+arg	out	value	PROPVARIANT	1
+
+meth	CreateHasher	HRESULT	0
+arg	in	index	uint32	0
+arg	out	hasher	IHasher	2
+
+iface	IHasher	4	192	IUnknown
+
+meth	Init	void	0
+
+meth	Update	void	0
+arg	in	data	uint8	1	const
+arg	in	size	uint32	0
+
+meth	Final	void	0
+arg	out	data	uint8	1
+
+meth	GetDigestSize	uint32	0
