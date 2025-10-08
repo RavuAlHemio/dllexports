@@ -3,6 +3,7 @@
 import argparse
 import enum
 import json
+import re
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Union
 import jinja2
 
@@ -28,6 +29,12 @@ TEMPLATE = """
                 {% if arg.has_attrib("com_out") -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.ComOutPtrAttribute::.ctor() = (
                         01 00 00 00
+                    )
+                {% endif %}
+                {% if arg.count_in_arg is not none -%}
+                    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.NativeArrayInfoAttribute::.ctor() = (
+                        01 00 01 00 53 06 0F 43 6F 75 6E 74 50 61 72 61   // ....S..CountPara
+                        6D 49 6E 64 65 78 {{ arg.count_in_arg|hex_bytes_le(2) }}                           // mIndex..
                     )
                 {% endif %}
         {% endif %}
@@ -130,6 +137,9 @@ TEMPLATE = """
 {% endfor %}{# meta.interfaces #}
 """
 
+COUNT_IN_ARG_RE = re.compile("^ca([0-9]+)$")
+
+
 class MetaType:
     def __init__(self, name: str, stars: int = 0) -> None:
         self.name: str = name
@@ -139,12 +149,15 @@ class MetaType:
         def starless_il_type() -> str:
             remapped = {
                 "BOOL": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BOOL",
+                "BSTR": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BSTR",
+                "FILETIME": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.FILETIME",
                 "GUID": "valuetype [netstandard]System.Guid",
                 "HRESULT": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.HRESULT",
                 "IUnknown": "[Windows.Win32.winmd]Windows.Win32.System.Com.IUnknown",
                 "PROPID": "uint32",
                 "PROPVARIANT": "valuetype [Windows.Win32.winmd]Windows.Win32.System.Com.StructuredStorage.PROPVARIANT",
                 "size_t": "native uint",
+                "VARTYPE": "uint16",
             }.get(self.name, None)
             if remapped is not None:
                 return remapped
@@ -184,11 +197,15 @@ class ArgumentAttribute(enum.IntEnum):
     COM_OUT = 2
 
 class Argument:
-    def __init__(self, name: str, arg_type: MetaType, direction: ArgumentDirection, attributes: Iterable[ArgumentAttribute]):
+    def __init__(
+        self, name: str, arg_type: MetaType, direction: ArgumentDirection,
+        attributes: Iterable[ArgumentAttribute], count_in_arg: Optional[int] = None,
+    ) -> None:
         self.name: str = name
         self.arg_type: MetaType = arg_type
         self.direction: ArgumentDirection = direction
         self.attributes: FrozenSet[ArgumentAttribute] = frozenset(attributes)
+        self.count_in_arg: Optional[int] = None
 
     def has_attrib(self, attrib_name: str) -> bool:
         expected_value = getattr(ArgumentAttribute, attrib_name.upper())
@@ -248,6 +265,10 @@ class Metadata:
         self.funcs: List[Function] = []
         self.func_ptrs: List[FunctionPointerType] = []
         self.interfaces: List[Interface] = []
+
+
+def hex_bytes_le(number: int, byte_count: int) -> str:
+    return " ".join(f"{b:02X}" for b in number.to_bytes(byte_count, "little"))
 
 
 def run(json_path: str, il_path: str) -> None:
@@ -326,24 +347,44 @@ def run(json_path: str, il_path: str) -> None:
                     "out": ArgumentDirection.OUT,
                     "inout": ArgumentDirection.INOUT,
                 }[direction_str]
+                count_in_arg = None
                 if attribs_str.strip():
+                    attrib_words = {
+                        a.strip()
+                        for a in attribs_str.split(" ")
+                        if a.strip()
+                    }
+
+                    remove_us = set()
+                    for word in attrib_words:
+                        m = COUNT_IN_ARG_RE.match(word)
+                        if m is None:
+                            continue
+
+                        count_in_arg = int(m.group(1))
+                        remove_us.add(word)
+
+                    for word in remove_us:
+                        attrib_words.remove(word)
+
                     attribs: Set[ArgumentAttribute] = {
                         {
                             "const": ArgumentAttribute.CONST,
                             "com_out": ArgumentAttribute.COM_OUT,
-                        }[a.strip()]
-                        for a in attribs_str.split(" ")
-                        if a.strip()
+                        }[a]
+                        for a in attrib_words
                     }
                 else:
                     attribs = set()
 
-                func.args.append(Argument(
+                arg = Argument(
                     name,
                     MetaType(arg_type, arg_stars),
                     direction,
                     attribs,
-                ))
+                    count_in_arg,
+                )
+                func.args.append(arg)
                 continue
 
             if pieces[0] == "iface":
@@ -373,6 +414,7 @@ def run(json_path: str, il_path: str) -> None:
     env = jinja2.Environment(
         undefined=jinja2.StrictUndefined,
     )
+    env.filters["hex_bytes_le"] = hex_bytes_le
     tpl = env.from_string(TEMPLATE)
 
     output = tpl.render(
