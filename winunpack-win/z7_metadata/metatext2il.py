@@ -325,6 +325,15 @@ class Enumeration:
         self.base_type: MetaType = base_type
         self.name_to_variant: Dict[str, EnumVariant] = {}
 
+class StructField:
+    def __init__(self, name: str, field_type: MetaType) -> None:
+        self.name: str = name
+        self.field_type: MetaType = field_type
+
+class Struct:
+    def __init__(self, name: str) -> None:
+        self.name: str = name
+        self.fields: List[StructField] = []
 
 class Metadata:
     def __init__(self, name: str, version: str) -> None:
@@ -333,6 +342,7 @@ class Metadata:
         self.funcs: List[Function] = []
         self.func_ptrs: List[FunctionPointerType] = []
         self.interfaces: List[Interface] = []
+        self.structs: List[Struct] = []
         self.name_to_enum: Dict[str, Enumeration] = {}
 
 class CollectorState:
@@ -342,6 +352,7 @@ class CollectorState:
         self.iface: Optional[Interface] = None
         self.func: Optional[FunctionLike] = None
         self.enum: Optional[Enumeration] = None
+        self.struct: Optional[Struct] = None
         self.all_dlls: Set[str] = set()
 
     def collect_path(self, txt_path: str) -> None:
@@ -521,6 +532,18 @@ class CollectorState:
                     vnt = EnumVariant(name, int(num_str))
                     self.enum.name_to_variant[vnt.name] = vnt
                     continue
+
+                if pieces[0] == "sct":
+                    if len(pieces) != 2:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: sct NAME")
+                    self.struct = Struct(name)
+                    self.meta.structs.append(self.struct)
+                    continue
+
+                if pieces[0] == "fld":
+                    if len(pieces) != 4:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: fld NAME FIELDTYPE FIELDSTARS")
+                    raise NotImplementedError("TODO")
 
                 raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
 

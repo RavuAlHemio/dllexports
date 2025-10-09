@@ -16,3 +16,11 @@ enum	NZoneIdMode	int32
 vnt	kNone	0
 vnt	kAll	1
 vnt	kOffice	2
+
+enum	NOverwriteAnswer	int32
+vnt	kYes	0
+vnt	kYesToAll	1
+vnt	kNo	2
+vnt	kNoToAll	3
+vnt	kAutoRename	4
+vnt	kCancel	5

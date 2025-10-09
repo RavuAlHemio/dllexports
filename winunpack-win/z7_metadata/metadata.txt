@@ -5,6 +5,7 @@ inc	func_pointers.txt
 inc	exported_funcs.txt
 inc	enums.txt
 
+inc	archive.txt
 inc	coder.txt
 inc	folder.txt
 inc	folder_archive.txt

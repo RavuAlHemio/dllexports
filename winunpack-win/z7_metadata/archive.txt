@@ -1,0 +1,135 @@
+iface	ISequentialInStream	3	1	IUnknown
+smet	Read
+arg	out	data	void	1	ca1
+arg	in	size	uint32	0
+arg	out	processedSize	uint32	1
+
+iface	ISequentialOutStream	3	2	IUnknown
+smet	Write
+arg	in	data	void	1	const ca1
+arg	in	size	uint32	0
+arg	out	processedSize	uint32	1
+
+iface	IInStream	3	3	ISequentialInStream
+smet	Seek
+arg	in	offset	int64	0
+arg	in	seekOrigin	uint32	0
+arg	out	newPosition	uint64	1
+
+iface	IOutStream	3	4	ISequentialOutStream
+
+smet	Seek
+arg	in	offset	int64	0
+arg	in	seekOrigin	uint32	0
+arg	out	newPosition	uint64	1
+
+smet	SetSize
+arg	in	newSize	uint64	0
+
+iface	IStreamGetSize	3	6	IUnknown
+smet	GetSize
+arg	out	size	uint64	1
+
+iface	IOutStreamFinish	3	7	IUnknown
+smet	OutStreamFinish
+
+iface	IStreamGetProps	3	8	IUnknown
+smet	GetProps
+arg	out	size	uint64	1
+arg	out	cTime	FILETIME	1
+arg	out	aTime	FILETIME	1
+arg	out	mTime	FILETIME	1
+arg	out	attrib	uint32	1
+
+
+struct CStreamFileProps
+{
+  UInt64 Size;
+  UInt64 VolID;
+  UInt64 FileID_Low;
+  UInt64 FileID_High;
+  UInt32 NumLinks;
+  UInt32 Attrib;
+  FILETIME CTime;
+  FILETIME ATime;
+  FILETIME MTime;
+};
+
+
+#define Z7_IFACEM_IStreamGetProps2(x) \
+  x(GetProps2(CStreamFileProps *props))
+Z7_IFACE_CONSTR_STREAM(IStreamGetProps2, 0x09)
+
+#define Z7_IFACEM_IStreamGetProp(x) \
+  x(GetProperty(PROPID propID, PROPVARIANT *value)) \
+  x(ReloadProps())
+Z7_IFACE_CONSTR_STREAM(IStreamGetProp, 0x0a)
+
+
+/*
+IStreamSetRestriction::SetRestriction(UInt64 begin, UInt64 end)
+  
+  It sets region of data in output stream that is restricted.
+  For restricted region it's expected (or allowed)
+  that the caller can write to same region with different calls of Write()/SetSize().
+  Another regions of output stream will be supposed as non-restricted:
+    - The callee usually doesn't flush the data in restricted region.
+    - The callee usually can flush data from non-restricted region after writing.
+
+Actual restiction rules depend also from current stream position.
+It's recommended to call SetRestriction() just before the Write() call.
+So the callee can optimize writing and flushing, if that Write()
+operation is not restricted.
+
+Note: Each new call of SetRestriction() sets new restictions,
+so previous restrction calls has no effect anymore.
+
+inputs:
+ 
+  (begin > end) is not allowed, and returns E_FAIL;
+  
+  if (begin == end)
+  {
+    No restriction.
+    The caller will call Write() in sequential order.
+    After SetRestriction(begin, begin), but before next call of SetRestriction()
+    {
+      Additional condition:
+        it's expected that current stream seek position is equal to stream size.
+      The callee can make final flushing for any data before current stream seek position.
+      For each Write(size) call:
+        The callee can make final flushing for that new written data.
+    }
+    The pair of values (begin == 0 && end == 0) is recommended to remove write restriction.
+  }
+  
+  if (begin < end)
+  {
+    it means that callee must NOT flush any data in region [begin, end).
+    The caller is allowed to Seek() to that region and rewrite the
+    data in that restriction region.
+    if (end == (UInt64)(Int64)-1)
+    {
+      there is no upper bound for restricted region.
+      So non-restricted region will be [0, begin) in that case
+    }
+  }
+
+ returns:
+  - if (begin > end) it return ERROR code (E_FAIL)
+  - S_OK : if no errors.
+  - Also the call of SetRestriction() can initiate the flushing of already written data.
+    So it can return the result of that flushing.
+ 
+ Note: IOutStream::SetSize() also can change the data.
+    So it's not expected the call
+    IOutStream::SetSize() to region that was written before as unrestricted.
+*/
+
+#define Z7_IFACEM_IStreamSetRestriction(x) \
+  x(SetRestriction(UInt64 begin, UInt64 end)) \
+
+Z7_IFACE_CONSTR_STREAM(IStreamSetRestriction, 0x10)
+
+Z7_PURE_INTERFACES_END
+#endif

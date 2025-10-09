@@ -153,3 +153,27 @@ arg	in	currentSize	uint64	0
 smet	MoveArc_Finish
 
 smet	Before_ArcReopen
+
+iface	IFolderArchiveExtractCallback	1	7	IProgress
+
+smet	AskOverwrite
+arg	in	existName	char	1	const
+arg	in	existTime	FILETIME	1	const
+arg	in	existSize	uint64	1	const
+arg	in	newName	char	1	const
+arg	in	newTime	FILETIME	1	const
+arg	in	newSize	uint64	1	const
+arg	out	answer	int32	1
+
+smet	PrepareOperation
+arg	in	name	char	1	const
+arg	in	isFolder	int32	0
+arg	in	askExtractMode	int32	0
+oarg	in	position	uint64	1	const
+
+smet	MessageError
+arg	in	message	char	1	const
+
+smet	SetOperationResult
+arg	in	opRes	int32	0
+arg	in	encrypted	int32	0
