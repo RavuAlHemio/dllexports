@@ -1,5 +1,5 @@
 # metadata.txt -> metadata.il
-& python .\metajson2il.py .\metadata.txt .\metadata.il
+& python .\metatext2il.py .\metadata.txt .\metadata.il
 If ($LASTEXITCODE -ne 0) {
     Exit $LASTEXITCODE
 }
