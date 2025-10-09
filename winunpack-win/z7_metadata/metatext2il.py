@@ -70,7 +70,7 @@ TEMPLATE = """
 }
 .assembly extern Windows.Win32.winmd
 {
-	.ver 0:0:0:0
+    .ver 0:0:0:0
 }
 
 .assembly {{ meta.name }}.winmd
@@ -86,7 +86,7 @@ TEMPLATE = """
 .corflags 0x00000001 // ILOnly
 
 {% for fptr in meta.func_ptrs -%}
-.class public auto auto sealed beforefieldinit {{ meta.name }}.{{ fptr.name }}
+.class public auto autochar sealed beforefieldinit {{ meta.name }}.{{ fptr.name }}
     extends [netstandard]System.MulticastDelegate
 {
     .custom instance void [netstandard]System.Runtime.InteropServices.UnmanagedFunctionPointerAttribute::.ctor(valuetype [netstandard]System.Runtime.InteropServices.CallingConvention) = (
@@ -113,7 +113,7 @@ TEMPLATE = """
 {% endfor %}{# meta.func_ptrs #}
 
 {% if meta.funcs -%}
-.class public auto auto abstract sealed beforefieldinit {{ meta.name }}.Apis
+.class public auto autochar abstract sealed beforefieldinit {{ meta.name }}.Apis
     extends [netstandard]System.Object
 {
     {% for func in meta.funcs -%}
@@ -129,7 +129,7 @@ TEMPLATE = """
 {% endif %}{# meta.funcs #}
 
 {% for iface in meta.interfaces -%}
-.class interface public auto ansi abstract {{ meta.name }}.{{ iface.name }}
+.class interface public abstract auto ansi {{ meta.name }}.{{ iface.name }}
     implements {{ iface.base_type.il_type(meta) }}
 {
     {# gghhiijj-kkll-mmnn-oopp-qqrrssttuuvv becomes 01 00 jj ii hh gg ll kk nn mm oo pp qq rr ss tt uu vv 00 00 #}
