@@ -411,6 +411,17 @@ def run(json_path: str, il_path: str) -> None:
                 iface.methods.append(func)
                 continue
 
+            if pieces[0] == "smet":
+                # standard method (returns HRESULT)
+                if len(pieces) != 2:
+                    raise ValueError("Usage: smet NAME")
+                if iface is None:
+                    raise ValueError("\"smet\" entry without a previous \"iface\" entry")
+                name = pieces[1]
+                func = Method(name, MetaType("HRESULT", 0))
+                iface.methods.append(func)
+                continue
+
             raise ValueError(f"unknown command {pieces[0]!r}")
 
     imported_dlls = sorted(all_dlls)

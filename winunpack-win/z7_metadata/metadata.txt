@@ -61,28 +61,28 @@ fn	SetLargePageMode	HRESULT	0
 
 iface	IProgress	0	5	IUnknown
 
-meth	SetTotal	HRESULT	0
+smet	SetTotal
 arg	in	total	uint64	0
 
-meth	SetCompleted	HRESULT	0
+smet	SetCompleted
 arg	in	completeValue	uint64	1	const
 
 iface	ICompressCodecsInfo	4	96	IUnknown
 
-meth	GetNumMethods	HRESULT	0
+smet	GetNumMethods
 arg	out	numMethods	uint32	1
 
-meth	GetProperty	HRESULT	0
+smet	GetProperty
 arg	in	index	uint32	0
 arg	in	propID	PROPID	0
 arg	out	value	PROPVARIANT	1
 
-meth	CreateDecoder	HRESULT	0
+smet	CreateDecoder
 arg	in	index	uint32	0
 arg	in	iid	GUID	1	const
 arg	out	coder	void	2	com_out
 
-meth	CreateEncoder	HRESULT	0
+smet	CreateEncoder
 arg	in	index	uint32	0
 arg	in	iid	GUID	1	const
 arg	out	coder	void	2	com_out
@@ -91,12 +91,12 @@ iface	IHashers	4	193	IUnknown
 
 meth	GetNumHashers	uint32	0
 
-meth	GetHasherProp	HRESULT	0
+smet	GetHasherProp
 arg	in	index	uint32	0
 arg	in	propID	PROPID	0
 arg	out	value	PROPVARIANT	1
 
-meth	CreateHasher	HRESULT	0
+smet	CreateHasher
 arg	in	index	uint32	0
 arg	out	hasher	IHasher	2	com_out
 
@@ -115,62 +115,62 @@ meth	GetDigestSize	uint32	0
 
 iface	IFolderFolder	8	0	IUnknown
 
-meth	LoadItems	HRESULT	0
+smet	LoadItems
 
-meth	GetNumberOfItems	HRESULT	0
+smet	GetNumberOfItems
 arg	out	numItems	uint32	1
 
-meth	GetProperty	HRESULT	0
+smet	GetProperty
 arg	in	itemIndex	uint32	0
 arg	in	propID	PROPID	0
 arg	out	value	PROPVARIANT	1
 
-meth	BindToFolderByIndex	HRESULT	0
+smet	BindToFolderByIndex
 arg	in	index	uint32	0
 arg	out	resultFolder	IFolderFolder	2	com_out
 
-meth	BindToFolderByName	HRESULT	0
+smet	BindToFolderByName
 arg	in	name	char	1	const
 arg	out	resultFolder	IFolderFolder	2	com_out
 
-meth	BindToParentFolder	HRESULT	0
+smet	BindToParentFolder
 arg	out	resultFolder	IFolderFolder	2	com_out
 
-meth	GetNumberOfProperties	HRESULT	0
+smet	GetNumberOfProperties
 arg	out	numProperties	uint32	1
 
-meth	GetPropertyInfo	HRESULT	0
+smet	GetPropertyInfo
 arg	in	index	uint32	0
 arg	out	name	BSTR	1
 arg	out	propID	PROPID	1
 arg	out	varType	VARTYPE	1
 
-meth	GetFolderProperty	HRESULT	0
+smet	GetFolderProperty
 arg	in	propID	PROPID	0
 arg	out	value	PROPVARIANT	1
 
 iface	IFolderAltStreams	8	23	IUnknown
 
-meth	BindToAltStreamsByIndex	HRESULT	0
+smet	BindToAltStreamsByIndex
 arg	in	index	uint32	0
 arg	out	resultFolder	IFolderFolder	2	com_out
 
-meth	BindToAltStreamsByName	HRESULT	0
+smet	BindToAltStreamsByName
 arg	in	name	char	1	const
 arg	out	resultFolder	IFolderFolder	2	com_out
 
-meth	AreAltStreamsSupported	HRESULT	0
+smet	AreAltStreamsSupported
 arg	in	index	uint32	0
 arg	out	isSupported	int32	1
 
 iface	IFolderWasChanged	8	4	IUnknown
 
-meth	WasChanged	HRESULT	0
+smet	WasChanged
 arg	out	wasChanged	int32	1
 
 iface	IFolderOperationsExtractCallback	8	11	IProgress
 
-meth	AskWrite	HRESULT	0
+smet	AskWrite
 arg	in	srcPath	char	1	const
 arg	in	srcIsFolder	int32	0
 arg	in	srcTime	FILETIME	1	const
@@ -179,36 +179,36 @@ arg	in	destPathRequest	char	1	const
 arg	out	destPathResult	BSTR	1
 arg	out	writeAnswer	int32	1
 
-meth	ShowMessage	HRESULT	0
+smet	ShowMessage
 arg	in	message	char	1	const
 
-meth	SetCurrentFilePath	HRESULT	0
+smet	SetCurrentFilePath
 arg	in	filePath	char	1	const
 
-meth	SetNumFiles	HRESULT	0
+smet	SetNumFiles
 arg	in	numFiles	uint64	0
 
 iface	IFolderOperations	8	19	IUnknown
 
-meth	CreateFolder	HRESULT	0
+smet	CreateFolder
 arg	in	name	char	1	const
 arg	in	progress	IProgress	1
 
-meth	CreateFile	HRESULT	0
+smet	CreateFile
 arg	in	name	char	1	const
 arg	in	progress	IProgress	1
 
-meth	Rename	HRESULT	0
+smet	Rename
 arg	in	index	uint32	0
 arg	in	newName	char	1	const
 arg	in	progress	IProgress	1
 
-meth	Delete	HRESULT	0
+smet	Delete
 arg	in	indices	uint32	1	ca1
 arg	in	numItems	uint32	0
 arg	out	progress	IProgress	1
 
-meth	CopyTo	HRESULT	0
+smet	CopyTo
 arg	in	moveMode	int32	0
 arg	in	indices	uint32	1	ca2 const
 arg	in	numItems	uint32	0
