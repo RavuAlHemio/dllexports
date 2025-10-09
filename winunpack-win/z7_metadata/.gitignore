@@ -1,2 +1,8 @@
+# intermediate artifacts
 metadata.il
+
+# final artifacts
 metadata.winmd
+
+# tools
+ilasm.exe

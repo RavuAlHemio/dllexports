@@ -5,4 +5,14 @@ If ($LASTEXITCODE -ne 0) {
 }
 
 # metadata.il -> metadata.winmd
-& C:\Windows\Microsoft.NET\Framework64\v4.0.30319\ilasm.exe /dll /output=metadata.winmd metadata.il
+If (-not (Test-Path -Path ".\ilasm.exe")) {
+    Write-Error -Message "
+
+You are missing ilasm.exe in the current directory.
+
+You can obtain it from the NuGet package `"runtime.win-x64.Microsoft.NETCore.ILAsm`"
+(or a different runtime than win-x64, depending on your computer and operating system);
+simply download the .nuget file and unzip it using a ZIP-capable program."
+    Exit 1
+}
+& .\ilasm.exe /dll /output=metadata.winmd metadata.il
