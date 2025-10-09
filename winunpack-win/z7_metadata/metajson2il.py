@@ -52,6 +52,10 @@ TEMPLATE = """
     )
     .ver 2:1:0:0
 }
+.assembly extern Windows.Win32.winmd
+{
+	.ver 0:0:0:0
+}
 
 .assembly {{ meta.name }}.winmd
 {

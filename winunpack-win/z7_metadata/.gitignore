@@ -1,8 +1,13 @@
-# intermediate artifacts
-metadata.il
-
 # final artifacts
 metadata.winmd
 
+# intermediate artifacts
+metadata.il
+
+# dependencies
+Windows.Win32.winmd
+
 # tools
 ilasm.exe
+# not required but you might have it next to ilasm:
+ildasm.exe
