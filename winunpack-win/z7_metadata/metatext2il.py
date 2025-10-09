@@ -335,18 +335,6 @@ class Metadata:
         self.interfaces: List[Interface] = []
         self.name_to_enum: Dict[str, Enumeration] = {}
 
-def pascal_str_hex_bytes(text: str) -> str:
-    length = len(text)
-    # not sure if there's a multibyte encoding where the top bit is set, so cut off at 127
-    if length > 127:
-        raise ValueError("text too long for Pascal string")
-    text_hex = " ".join(f"{b:02X}" for b in text.encode("utf-8"))
-    return f"{length:02X} {text_hex}"
-
-def hex_bytes_le(number: int, byte_count: int) -> str:
-    return " ".join(f"{b:02X}" for b in number.to_bytes(byte_count, "little"))
-
-
 class CollectorState:
     def __init__(self) -> None:
         self.meta: Optional[Metadata] = None
@@ -535,6 +523,20 @@ class CollectorState:
                     continue
 
                 raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
+
+
+def pascal_str_hex_bytes(text: str) -> str:
+    length = len(text)
+    # not sure if there's a multibyte encoding where the top bit is set, so cut off at 127
+    if length > 127:
+        raise ValueError("text too long for Pascal string")
+    text_hex = " ".join(f"{b:02X}" for b in text.encode("utf-8"))
+    return f"{length:02X} {text_hex}"
+
+
+def hex_bytes_le(number: int, byte_count: int) -> str:
+    return " ".join(f"{b:02X}" for b in number.to_bytes(byte_count, "little"))
+
 
 def run(txt_path: str, il_path: str) -> None:
     collector = CollectorState()
