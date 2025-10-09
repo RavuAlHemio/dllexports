@@ -1,0 +1,155 @@
+iface	IArchiveFolder	1	13	IUnknown
+smet	Extract
+arg	in	indices	uint32	1	const ca1
+arg	in	numItems	uint32	0
+arg	in	includeAltStreams	int32	0
+arg	in	replaceAltStreamCharsMode	int32	0
+arg	in	pathMode	NPathMode	0
+arg	in	overwriteMode	NOverwriteMode	0
+arg	in	path	char	1
+arg	in	testMode	int32	0
+arg	in	extractCallback2	IFolderArchiveExtractCallback	1
+
+iface	IInFolderArchive	1	14	IUnknown
+
+smet	Open
+oarg	in	inStream	IInStream	1
+oarg	in	filePath	char	1	const
+arg	in	arcFormat	char	1	const
+oarg	out	archiveTypeRes	BSTR	1
+oarg	in	openArchiveCallback	IArchiveOpenCallback	1
+
+smet	ReOpen
+oarg	in	openArchiveCallback	IArchiveOpenCallback	1
+
+smet	Close
+
+smet	GetNumberOfProperties
+arg	out	numProperties	uint32	1
+
+smet	GetPropertyInfo
+arg	in	index	uint32	0
+arg	out	name	BSTR	1
+arg	out	propID	PROPID	1
+arg	out	varType	VARTYPE	1
+
+smet	BindToRootFolder
+arg	out	resultFolder	IFolderFolder	2	com_out
+
+smet	Extract
+arg	in	pathMode	NPathMode	0
+arg	in	overwriteMode	NOverwriteMode	0
+arg	in	path	char	1	const
+arg	in	testMode	int32	0
+arg	in	extractCallback2	IFolderArchiveExtractCallback	1
+
+iface	IFolderArchiveUpdateCallback	1	11	IProgress
+
+smet	CompressOperation
+arg	in	name	char	1	const
+
+smet	DeleteOperation
+arg	in	name	char	1	const
+
+smet	OperationResult
+arg	in	opRes	int32	0
+
+smet	UpdateErrorMessage
+arg	in	message	char	1	const
+
+smet	SetNumFiles
+arg	in	numFiles	uint64	0
+
+iface	IOutFolderArchive	1	15	IUnknown
+
+smet	SetFolder
+oarg	in	folder	IFolderFolder	1
+
+smet	SetFiles
+arg	in	folderPrefix	char	1	const
+oarg	in	names	char	2	const ca2
+arg	in	numNames	uint32	0
+
+smet	DeleteItems
+arg	in	outArchiveStream	ISequentialOutStream	1
+oarg	in	indices	uint32	1	const ca2
+arg	in	numItems	uint32	0
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+
+smet	DoOperation
+# actually: FStringVector, FStringVector, CCodecs
+oarg	in	requestedPaths	void	1
+oarg	in	processedPaths	void	1
+arg	in	codecs	void	1
+arg	in	index	int32	0
+oarg	in	outArchiveStream	ISequentialOutStream	1
+arg	in	stateActions	uint8	1	const cc7
+oarg	in	sfxModule	char	1	const
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+
+smet	DoOperation2
+# actually: FStringVector, FStringVector
+oarg	in	requestedPaths	void	1
+oarg	in	processedPaths	void	1
+oarg	in	outArchiveStream	ISequentialOutStream	1
+arg	in	stateActions	uint8	1	const cc7
+oarg	in	sfxModule	char	1	const
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+
+iface	IFolderArchiveUpdateCallback2	1	16	IUnknown
+
+smet	OpenFileError
+arg	in	path	char	1	const
+arg	in	errorCode	HRESULT	0
+
+smet	ReadingFileError
+arg	in	path	char	1	const
+arg	in	errorCode	HRESULT	0
+
+smet	ReportExtractResult
+arg	in	opRes	int32	0
+arg	in	isEncrypted	int32	0
+arg	in	path	char	1	const
+
+smet	ReportUpdateOperation
+arg	in	notifyOp	uint32	0
+arg	in	path	char	1	const
+arg	in	isDir	int32	0
+
+iface	IFolderScanProgress	1	17	IUnknown
+
+smet	ScanError
+arg	in	path	char	1	const
+arg	in	errorCode	HRESULT	0
+
+smet	ScanProgress
+arg	in	numFolders	uint64	0
+arg	in	numFiles	uint64	0
+arg	in	totalSize	uint64	0
+arg	in	path	char	1	const
+arg	in	isDir	int32	0
+
+iface	IFolderSetZoneIdMode	1	18	IUnknown
+smet	SetZoneIdMode
+arg	in	zoneMode	NZoneIdMode	0
+
+iface	IFolderSetZoneIdFile	1	19	IUnknown
+smet	SetZoneIdFile
+arg	in	data	uint8	1	const ca1
+arg	in	size	uint32	0
+
+iface	IFolderArchiveUpdateCallback_MoveArc	1	20	IUnknown
+
+smet	MoveArc_Start
+arg	in	srcTempPath	char	1	const
+arg	in	destFinalPath	char	1	const
+arg	in	size	uint64	0
+arg	in	updateMode	int32	0
+
+smet	MoveArc_Progress
+arg	in	totalSize	uint64	0
+arg	in	currentSize	uint64	0
+
+smet	MoveArc_Finish
+
+smet	Before_ArcReopen

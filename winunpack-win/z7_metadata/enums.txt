@@ -1,0 +1,18 @@
+enum	NPathMode	int32
+vnt	kFullPaths	0
+vnt	kCurPaths	1
+vnt	kNoPaths	2
+vnt	kAbsPaths	3
+vnt	kNoPathsAlt	4
+
+enum	NOverwriteMode	int32
+vnt	kAsk	0
+vnt	kOverwrite	1
+vnt	kSkip	2
+vnt	kRename	3
+vnt	kRenameExisting	4
+
+enum	NZoneIdMode	int32
+vnt	kNone	0
+vnt	kAll	1
+vnt	kOffice	2

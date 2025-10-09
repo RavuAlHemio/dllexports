@@ -1,0 +1,7 @@
+iface	IProgress	0	5	IUnknown
+
+smet	SetTotal
+arg	in	total	uint64	0
+
+smet	SetCompleted
+oarg	in	completeValue	uint64	1	const

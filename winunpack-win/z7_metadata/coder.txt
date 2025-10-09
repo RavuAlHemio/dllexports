@@ -1,0 +1,45 @@
+iface	ICompressCodecsInfo	4	96	IUnknown
+
+smet	GetNumMethods
+arg	out	numMethods	uint32	1
+
+smet	GetProperty
+arg	in	index	uint32	0
+arg	in	propID	PROPID	0
+arg	out	value	PROPVARIANT	1
+
+smet	CreateDecoder
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	coder	void	2	com_out
+
+smet	CreateEncoder
+arg	in	index	uint32	0
+arg	in	iid	GUID	1	const
+arg	out	coder	void	2	com_out
+
+iface	IHashers	4	193	IUnknown
+
+meth	GetNumHashers	uint32	0
+
+smet	GetHasherProp
+arg	in	index	uint32	0
+arg	in	propID	PROPID	0
+arg	out	value	PROPVARIANT	1
+
+smet	CreateHasher
+arg	in	index	uint32	0
+arg	out	hasher	IHasher	2	com_out
+
+iface	IHasher	4	192	IUnknown
+
+meth	Init	void	0
+
+meth	Update	void	0
+arg	in	data	uint8	1	const
+arg	in	size	uint32	0
+
+meth	Final	void	0
+arg	out	data	uint8	1
+
+meth	GetDigestSize	uint32	0

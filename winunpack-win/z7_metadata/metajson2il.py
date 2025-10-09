@@ -2,9 +2,8 @@
 
 import argparse
 import enum
-import json
 import re
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Union
+from typing import Dict, FrozenSet, Iterable, List, Optional, Set
 import jinja2
 
 
@@ -14,12 +13,13 @@ TEMPLATE = """
         {% if not loop.first %}, {% endif -%}
         {% if arg.direction.is_in %}[in] {% endif -%}
         {% if arg.direction.is_out %}[out] {% endif -%}
+        {% if arg.optional %}[opt] {% endif -%}
         {{ arg.arg_type.il_type(meta) }} '{{ arg.name }}'
     {% endfor -%}
 {% endmacro -%}
 {%- macro output_arg_attributes(args) -%}
     {% for arg in args -%}
-        {% if arg.attributes -%}
+        {% if arg.attributes or arg.count_in_arg is not none or arg.arg_type.base_enum is not none -%}
             .param [{{ loop.index }}]
                 {% if arg.has_attrib("const") -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.ConstAttribute::.ctor() = (
@@ -33,8 +33,24 @@ TEMPLATE = """
                 {% endif %}
                 {% if arg.count_in_arg is not none -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.NativeArrayInfoAttribute::.ctor() = (
-                        01 00 01 00 53 06 0F 43 6F 75 6E 74 50 61 72 61   // ....S..CountPara
-                        6D 49 6E 64 65 78 {{ arg.count_in_arg|hex_bytes_le(2) }}                           // mIndex..
+                        01 00 01 00
+                        53 06
+                        0F 43 6F 75 6E 74 50 61 72 61 6D 49 6E 64 65 78 // length prefix plus "CountParamIndex"
+                        {{ arg.count_in_arg|hex_bytes_le(2) }}
+                    )
+                {% elif arg.const_count is not none -%}
+                    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.NativeArrayInfoAttribute::.ctor() = (
+                        01 00 01 00
+                        53 08
+                        0A 43 6F 75 6E 74 43 6F 6E 73 74 // length prefix plus "CountConst"
+                        {{ arg.const_count|hex_bytes_le(4) }}
+                    )
+                {% endif %}
+                {% if arg.arg_type.base_enum is not none -%}
+                    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.AssociatedEnumAttribute::.ctor() = (
+                        01 00
+                        {{ arg.arg_type.base_enum|pascal_str_hex_bytes }}
+                        00 00
                     )
                 {% endif %}
         {% endif %}
@@ -139,15 +155,42 @@ TEMPLATE = """
     {% endfor %}
 }
 {% endfor %}{# meta.interfaces #}
+
+{% for enum in meta.name_to_enum.values() -%}
+.class public auto ansi sealed {{ meta.name }}.{{ enum.name }}
+       extends [netstandard]System.Enum
+{
+  .field public specialname rtspecialname {{ enum.base_type.il_type(meta) }} value__
+  {% for variant in enum.name_to_variant.values() %}
+  .field public static literal valuetype {{ meta.name }}.{{ enum.name }} {{ variant.name }} = {{ enum.base_type.il_type(meta) }}({{ variant.value }})
+  {% endfor %}
+}
+{% endfor %}{# meta.name_to_enum #}
 """
 
+CONST_COUNT_RE = re.compile("^cc([0-9]+)$")
 COUNT_IN_ARG_RE = re.compile("^ca([0-9]+)$")
 
 
 class MetaType:
     def __init__(self, name: str, stars: int = 0) -> None:
+        if stars < 0:
+            raise ValueError("stars must be at least 0")
+
         self.name: str = name
         self.stars: int = stars
+        self.base_enum: Option[str] = None
+
+    def enrich_base_enum(self, meta: 'Metadata') -> None:
+        if self.stars != 0:
+            return
+
+        ilt = self.il_type(meta)
+        en = meta.name_to_enum.get(ilt, None)
+        if en is not None:
+            self.name = en.base_type.name
+            self.stars = en.base_type.stars
+            self.base_enum = en.name
 
     def il_type(self, meta: 'Metadata') -> str:
         def starless_il_type() -> str:
@@ -202,14 +245,20 @@ class ArgumentAttribute(enum.IntEnum):
 
 class Argument:
     def __init__(
-        self, name: str, arg_type: MetaType, direction: ArgumentDirection,
+        self, name: str, arg_type: MetaType, direction: ArgumentDirection, optional: bool,
         attributes: Iterable[ArgumentAttribute], count_in_arg: Optional[int] = None,
+        const_count: Optional[int] = None,
     ) -> None:
+        if count_in_arg is not None and const_count is not None:
+            raise ValueError("count_in_arg and const_count must not be set simultaneously")
+
         self.name: str = name
         self.arg_type: MetaType = arg_type
         self.direction: ArgumentDirection = direction
+        self.optional: bool = optional
         self.attributes: FrozenSet[ArgumentAttribute] = frozenset(attributes)
-        self.count_in_arg: Optional[int] = None
+        self.count_in_arg: Optional[int] = count_in_arg
+        self.const_count: Optional[int] = const_count
 
     def has_attrib(self, attrib_name: str) -> bool:
         expected_value = getattr(ArgumentAttribute, attrib_name.upper())
@@ -258,8 +307,23 @@ class Interface:
 
 
 class Method(FunctionLike):
-    def __init__(self, name: str, return_type: MetaType) -> None:
-        super().__init__(name, return_type)
+    pass
+
+
+class EnumVariant:
+    def __init__(self, name: str, value: int):
+        self.name: str = name
+        self.value: int = value
+
+
+class Enumeration:
+    def __init__(self, name: str, base_type: MetaType) -> None:
+        if base_type.stars != 0:
+            raise ValueError("enumeration base type must have 0 stars")
+
+        self.name: str = name
+        self.base_type: MetaType = base_type
+        self.name_to_variant: Dict[str, EnumVariant] = {}
 
 
 class Metadata:
@@ -269,171 +333,224 @@ class Metadata:
         self.funcs: List[Function] = []
         self.func_ptrs: List[FunctionPointerType] = []
         self.interfaces: List[Interface] = []
+        self.name_to_enum: Dict[str, Enumeration] = {}
 
+def pascal_str_hex_bytes(text: str) -> str:
+    length = len(text)
+    # not sure if there's a multibyte encoding where the top bit is set, so cut off at 127
+    if length > 127:
+        raise ValueError("text too long for Pascal string")
+    text_hex = " ".join(f"{b:02X}" for b in text.encode("utf-8"))
+    return f"{length:02X} {text_hex}"
 
 def hex_bytes_le(number: int, byte_count: int) -> str:
     return " ".join(f"{b:02X}" for b in number.to_bytes(byte_count, "little"))
 
 
-def run(json_path: str, il_path: str) -> None:
-    meta: Optional[Metadata] = None
-    dll: Optional[str] = None
-    iface: Optional[Interface] = None
-    func: Optional[FunctionLike] = None
+class CollectorState:
+    def __init__(self) -> None:
+        self.meta: Optional[Metadata] = None
+        self.dll: Optional[str] = None
+        self.iface: Optional[Interface] = None
+        self.func: Optional[FunctionLike] = None
+        self.enum: Optional[Enumeration] = None
+        self.all_dlls: Set[str] = set()
 
-    all_dlls: Set[str] = set()
+    def collect_path(self, txt_path: str) -> None:
+        with open(txt_path, "r", encoding="utf-8") as f:
+            for (line_index, raw_ln) in enumerate(f):
+                line_number = line_index + 1
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        for raw_ln in f:
-            # strip the newline
-            ln = raw_ln.rstrip("\r\n")
+                # strip the newline
+                ln = raw_ln.rstrip("\r\n")
 
-            # strip comments
-            hash_index = ln.find("#")
-            if hash_index != -1:
-                ln = ln[:hash_index].rstrip()
+                # strip comments
+                hash_index = ln.find("#")
+                if hash_index != -1:
+                    ln = ln[:hash_index].rstrip()
 
-            # skip empty or whitespace-only lines
-            if not ln.strip():
-                continue
+                # skip empty or whitespace-only lines
+                if not ln.strip():
+                    continue
 
-            pieces = ln.split("\t")
+                pieces = ln.split("\t")
 
-            # okay, what are we dealing with?
-            if pieces[0] == "meta":
-                if len(pieces) != 3:
-                    raise ValueError("Usage: meta NAME VERSION")
-                (name, version) = pieces[1:3]
-                meta = Metadata(name, version)
-                continue
+                # okay, what are we dealing with?
+                if pieces[0] == "meta":
+                    if len(pieces) != 3:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: meta NAME VERSION")
+                    (name, version) = pieces[1:3]
+                    self.meta = Metadata(name, version)
+                    continue
 
-            if meta is None:
-                raise ValueError("first entry must be \"meta\"")
+                if self.meta is None:
+                    raise ValueError(f"file {txt_path} line {line_number}: first entry must be \"meta\"")
 
-            if pieces[0] == "fptr":
-                if len(pieces) != 4:
-                    raise ValueError("Usage: fptr NAME RETTYPE RETSTARS")
-                (name, ret_type, ret_stars_str) = pieces[1:4]
-                ret_stars = int(ret_stars_str)
-                WINAPI_INT = 1 # System.Runtime.InteropServices.CallingConvention
-                func = FunctionPointerType(name, MetaType(ret_type, ret_stars), WINAPI_INT)
-                meta.func_ptrs.append(func)
-                continue
+                if pieces[0] == "fptr":
+                    if len(pieces) != 4:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: fptr NAME RETTYPE RETSTARS")
+                    (name, ret_type, ret_stars_str) = pieces[1:4]
+                    ret_stars = int(ret_stars_str)
+                    WINAPI_INT = 1 # System.Runtime.InteropServices.CallingConvention
+                    self.func = FunctionPointerType(name, MetaType(ret_type, ret_stars), WINAPI_INT)
+                    self.func.return_type.enrich_base_enum(self.meta)
+                    self.meta.func_ptrs.append(self.func)
+                    continue
 
-            if pieces[0] == "dll":
-                if len(pieces) != 2:
-                    raise ValueError("Usage: dll NAME")
-                dll = pieces[1]
-                all_dlls.add(pieces[1].lower())
-                continue
+                if pieces[0] == "dll":
+                    if len(pieces) != 2:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: dll NAME")
+                    self.dll = pieces[1]
+                    self.all_dlls.add(pieces[1].lower())
+                    continue
 
-            if pieces[0] == "fn":
-                if len(pieces) != 4:
-                    raise ValueError("Usage: fn NAME RETTYPE RETSTARS")
-                if dll is None:
-                    raise ValueError("\"fn\" entry without a previous \"dll\" entry")
-                (name, ret_type, ret_stars_str) = pieces[1:4]
-                ret_stars = int(ret_stars_str)
-                func = Function(dll, name, MetaType(ret_type, ret_stars), None)
-                meta.funcs.append(func)
-                continue
+                if pieces[0] == "fn":
+                    if len(pieces) != 4:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: fn NAME RETTYPE RETSTARS")
+                    if self.dll is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"fn\" entry without a previous \"dll\" entry")
+                    (name, ret_type, ret_stars_str) = pieces[1:4]
+                    ret_stars = int(ret_stars_str)
+                    self.func = Function(self.dll, name, MetaType(ret_type, ret_stars), None)
+                    self.func.return_type.enrich_base_enum(self.meta)
+                    self.meta.funcs.append(self.func)
+                    continue
 
-            if pieces[0] == "arg":
-                if len(pieces) not in (5, 6):
-                    raise ValueError("Usage: arg DIRECTION NAME TYPE STARS [ATTRIBS]")
-                if func is None:
-                    raise ValueError("\"arg\" entry without a previous \"func\" or \"fptr\" entry")
-                (direction_str, name, arg_type, arg_stars_str) = pieces[1:5]
-                attribs_str = pieces[5] if len(pieces) > 5 else ""
-                arg_stars = int(arg_stars_str)
-                direction = {
-                    "in": ArgumentDirection.IN,
-                    "out": ArgumentDirection.OUT,
-                    "inout": ArgumentDirection.INOUT,
-                }[direction_str]
-                count_in_arg = None
-                if attribs_str.strip():
-                    attrib_words = {
-                        a.strip()
-                        for a in attribs_str.split(" ")
-                        if a.strip()
-                    }
+                if pieces[0] in ("arg", "oarg"):
+                    if len(pieces) not in (5, 6):
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: arg|oarg DIRECTION NAME TYPE STARS [ATTRIBS] (oarg = optional argument)")
+                    if self.func is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"arg\" entry without a previous \"func\" or \"fptr\" entry")
+                    (direction_str, name, arg_type, arg_stars_str) = pieces[1:5]
+                    attribs_str = pieces[5] if len(pieces) > 5 else ""
+                    arg_stars = int(arg_stars_str)
+                    direction = {
+                        "in": ArgumentDirection.IN,
+                        "out": ArgumentDirection.OUT,
+                        "inout": ArgumentDirection.INOUT,
+                    }[direction_str]
+                    const_count = None
+                    count_in_arg = None
+                    if attribs_str.strip():
+                        attrib_words = {
+                            a.strip()
+                            for a in attribs_str.split(" ")
+                            if a.strip()
+                        }
 
-                    remove_us = set()
-                    for word in attrib_words:
-                        m = COUNT_IN_ARG_RE.match(word)
-                        if m is None:
-                            continue
+                        remove_us = set()
+                        for word in attrib_words:
+                            if (m := COUNT_IN_ARG_RE.match(word)) is not None:
+                                count_in_arg = int(m.group(1))
+                                remove_us.add(word)
+                            elif (m := CONST_COUNT_RE.match(word)) is not None:
+                                const_count = int(m.group(1))
+                                remove_us.add(word)
 
-                        count_in_arg = int(m.group(1))
-                        remove_us.add(word)
+                        for word in remove_us:
+                            attrib_words.remove(word)
 
-                    for word in remove_us:
-                        attrib_words.remove(word)
+                        attribs: Set[ArgumentAttribute] = {
+                            {
+                                "const": ArgumentAttribute.CONST,
+                                "com_out": ArgumentAttribute.COM_OUT,
+                            }[a]
+                            for a in attrib_words
+                        }
+                    else:
+                        attribs = set()
 
-                    attribs: Set[ArgumentAttribute] = {
-                        {
-                            "const": ArgumentAttribute.CONST,
-                            "com_out": ArgumentAttribute.COM_OUT,
-                        }[a]
-                        for a in attrib_words
-                    }
-                else:
-                    attribs = set()
+                    arg = Argument(
+                        name,
+                        MetaType(arg_type, arg_stars),
+                        direction,
+                        pieces[0] == "oarg",
+                        attribs,
+                        count_in_arg,
+                        const_count,
+                    )
+                    arg.arg_type.enrich_base_enum(self.meta)
+                    self.func.args.append(arg)
+                    continue
 
-                arg = Argument(
-                    name,
-                    MetaType(arg_type, arg_stars),
-                    direction,
-                    attribs,
-                    count_in_arg,
-                )
-                func.args.append(arg)
-                continue
+                if pieces[0] == "iface":
+                    if len(pieces) != 5:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: iface NAME GROUP VALUE BASETYPE")
+                    (name, group_str, value_str, base_type) = pieces[1:5]
+                    group, value = int(group_str), int(value_str)
+                    self.iface = Interface(name, group, value, MetaType(base_type, 0))
+                    self.meta.interfaces.append(self.iface)
+                    continue
 
-            if pieces[0] == "iface":
-                if len(pieces) != 5:
-                    raise ValueError("Usage: iface NAME GROUP VALUE BASETYPE")
-                (name, group_str, value_str, base_type) = pieces[1:5]
-                group, value = int(group_str), int(value_str)
-                iface = Interface(name, group, value, MetaType(base_type, 0))
-                meta.interfaces.append(iface)
-                continue
+                if pieces[0] == "meth":
+                    if len(pieces) != 4:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: meth NAME RETTYPE RETSTARS")
+                    if self.iface is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"meth\" entry without a previous \"iface\" entry")
+                    (name, ret_type, ret_stars_str) = pieces[1:4]
+                    ret_stars = int(ret_stars_str)
+                    self.func = Method(name, MetaType(ret_type, ret_stars))
+                    self.func.return_type.enrich_base_enum(self.meta)
+                    self.iface.methods.append(self.func)
+                    continue
 
-            if pieces[0] == "meth":
-                if len(pieces) != 4:
-                    raise ValueError("Usage: meth NAME RETTYPE RETSTARS")
-                if iface is None:
-                    raise ValueError("\"meth\" entry without a previous \"iface\" entry")
-                (name, ret_type, ret_stars_str) = pieces[1:4]
-                ret_stars = int(ret_stars_str)
-                func = Method(name, MetaType(ret_type, ret_stars))
-                iface.methods.append(func)
-                continue
+                if pieces[0] == "smet":
+                    # standard method (returns HRESULT)
+                    if len(pieces) != 2:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: smet NAME")
+                    if self.iface is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"smet\" entry without a previous \"iface\" entry")
+                    name = pieces[1]
+                    self.func = Method(name, MetaType("HRESULT", 0))
+                    self.iface.methods.append(self.func)
+                    continue
 
-            if pieces[0] == "smet":
-                # standard method (returns HRESULT)
-                if len(pieces) != 2:
-                    raise ValueError("Usage: smet NAME")
-                if iface is None:
-                    raise ValueError("\"smet\" entry without a previous \"iface\" entry")
-                name = pieces[1]
-                func = Method(name, MetaType("HRESULT", 0))
-                iface.methods.append(func)
-                continue
+                if pieces[0] == "inc":
+                    if len(pieces) != 2:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: inc PATH")
+                    sub_txt_name = pieces[1]
+                    self.collect_path(sub_txt_name)
+                    continue
 
-            raise ValueError(f"unknown command {pieces[0]!r}")
+                if pieces[0] == "enum":
+                    if len(pieces) != 3:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: enum NAME BASETYPE")
+                    (name, basetype_str) = pieces[1:3]
+                    if name in self.meta.name_to_enum:
+                        raise ValueError(f"file {txt_path} line {line_number}: duplicate enum named {name!r}")
+                    self.enum = Enumeration(name, MetaType(basetype_str, 0))
+                    self.meta.name_to_enum[self.enum.name] = self.enum
+                    continue
 
-    imported_dlls = sorted(all_dlls)
+                if pieces[0] == "vnt":
+                    if len(pieces) != 3:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: vnt NAME NUMVALUE")
+                    if self.enum is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"vnt\" entry without a previous \"enum\" entry")
+                    (name, num_str) = pieces[1:3]
+                    if name in self.enum.name_to_variant:
+                        raise ValueError(f"file {txt_path} line {line_number}: duplicate variant {name!r} in enum named {self.enum.name!r}")
+                    vnt = EnumVariant(name, int(num_str))
+                    self.enum.name_to_variant[vnt.name] = vnt
+                    continue
+
+                raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
+
+def run(txt_path: str, il_path: str) -> None:
+    collector = CollectorState()
+    collector.collect_path(txt_path)
+
+    imported_dlls = sorted(collector.all_dlls)
 
     env = jinja2.Environment(
         undefined=jinja2.StrictUndefined,
     )
+    env.filters["pascal_str_hex_bytes"] = pascal_str_hex_bytes
     env.filters["hex_bytes_le"] = hex_bytes_le
     tpl = env.from_string(TEMPLATE)
 
     output = tpl.render(
-        meta=meta,
+        meta=collector.meta,
         imported_dlls=imported_dlls,
     )
 
@@ -444,14 +561,14 @@ def run(json_path: str, il_path: str) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        dest="json_path",
+        dest="txt_path",
     )
     parser.add_argument(
         dest="il_path",
     )
     args = parser.parse_args()
 
-    run(args.json_path, args.il_path)
+    run(args.txt_path, args.il_path)
 
 
 if __name__ == "__main__":
