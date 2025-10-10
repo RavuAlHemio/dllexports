@@ -19,7 +19,12 @@ TEMPLATE = """
 {% endmacro -%}
 {%- macro output_arg_attributes(args) -%}
     {% for arg in args -%}
-        {% if arg.attributes or arg.count_in_arg is not none or arg.arg_type.base_enum is not none -%}
+        {% if
+            arg.attributes
+            or arg.count_in_arg is not none
+            or arg.const_count is not none
+            or arg.arg_type.base_enum is not none
+        -%}
             .param [{{ loop.index }}]
                 {% if arg.has_attrib("const") -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.ConstAttribute::.ctor() = (
@@ -36,20 +41,20 @@ TEMPLATE = """
                         01 00 01 00
                         53 06
                         0F 43 6F 75 6E 74 50 61 72 61 6D 49 6E 64 65 78 // length prefix plus "CountParamIndex"
-                        {{ arg.count_in_arg|hex_bytes_le(2) }}
+                        {{ arg.count_in_arg|hex_bytes_le(2) }} // {{ arg.count_in_arg }}
                     )
                 {% elif arg.const_count is not none -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.NativeArrayInfoAttribute::.ctor() = (
                         01 00 01 00
                         53 08
                         0A 43 6F 75 6E 74 43 6F 6E 73 74 // length prefix plus "CountConst"
-                        {{ arg.const_count|hex_bytes_le(4) }}
+                        {{ arg.const_count|hex_bytes_le(4) }} // {{ arg.const_count }}
                     )
                 {% endif %}
                 {% if arg.arg_type.base_enum is not none -%}
                     .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.AssociatedEnumAttribute::.ctor() = (
                         01 00
-                        {{ arg.arg_type.base_enum|pascal_str_hex_bytes }}
+                        {{ arg.arg_type.base_enum|pascal_str_hex_bytes }} // {{ arg.arg_type.base_enum }}
                         00 00
                     )
                 {% endif %}
@@ -166,6 +171,16 @@ TEMPLATE = """
   {% endfor %}
 }
 {% endfor %}{# meta.name_to_enum #}
+
+{% for struct in meta.structs %}
+.class public sequential ansi sealed beforefieldinit {{ meta.name }}.{{ struct.name }}
+       extends [netstandard]System.ValueType
+{
+  {% for field in struct.fields %}
+  .field public {{ field.field_type.il_type(meta) }} '{{ field.name }}'
+  {% endfor %}
+}
+{% endfor %}{# meta.structs #}
 """
 
 CONST_COUNT_RE = re.compile("^cc([0-9]+)$")
@@ -179,52 +194,52 @@ class MetaType:
 
         self.name: str = name
         self.stars: int = stars
-        self.base_enum: Option[str] = None
+        self.base_enum: Optional[str] = None
 
     def enrich_base_enum(self, meta: 'Metadata') -> None:
-        if self.stars != 0:
-            return
-
-        ilt = self.il_type(meta)
+        ilt = self.starless_il_type(meta)
         en = meta.name_to_enum.get(ilt, None)
         if en is not None:
             self.name = en.base_type.name
-            self.stars = en.base_type.stars
+            self.stars = en.base_type.stars + self.stars
             self.base_enum = en.name
 
+    def starless_il_type(self, meta: 'Metadata') -> str:
+        remapped = {
+            "BOOL": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BOOL",
+            "BSTR": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BSTR",
+            "FILETIME": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.FILETIME",
+            "GUID": "valuetype [netstandard]System.Guid",
+            "HRESULT": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.HRESULT",
+            "IUnknown": "[Windows.Win32.winmd]Windows.Win32.System.Com.IUnknown",
+            "PROPID": "uint32",
+            "PROPVARIANT": "valuetype [Windows.Win32.winmd]Windows.Win32.System.Com.StructuredStorage.PROPVARIANT",
+            "size_t": "native uint",
+            "VARTYPE": "uint16",
+        }.get(self.name, None)
+        if remapped is not None:
+            return remapped
+
+        # "I[A-Z][a-z]..."
+        is_com_interface = (
+            self.name.startswith("I")
+            and len(self.name) > 2
+            and self.name[1].isascii() and self.name[1].isupper()
+            and self.name[2].isascii() and self.name[2].islower()
+        )
+        if is_com_interface:
+            return f"class {meta.name}.{self.name}"
+
+        if any(fptr.name == self.name for fptr in meta.func_ptrs):
+            return f"class {meta.name}.{self.name}"
+
+        if any(sct.name == self.name for sct in meta.structs):
+            return f"valuetype {meta.name}.{self.name}"
+
+        return self.name
+
     def il_type(self, meta: 'Metadata') -> str:
-        def starless_il_type() -> str:
-            remapped = {
-                "BOOL": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BOOL",
-                "BSTR": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.BSTR",
-                "FILETIME": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.FILETIME",
-                "GUID": "valuetype [netstandard]System.Guid",
-                "HRESULT": "valuetype [Windows.Win32.winmd]Windows.Win32.Foundation.HRESULT",
-                "IUnknown": "[Windows.Win32.winmd]Windows.Win32.System.Com.IUnknown",
-                "PROPID": "uint32",
-                "PROPVARIANT": "valuetype [Windows.Win32.winmd]Windows.Win32.System.Com.StructuredStorage.PROPVARIANT",
-                "size_t": "native uint",
-                "VARTYPE": "uint16",
-            }.get(self.name, None)
-            if remapped is not None:
-                return remapped
-
-            # "I[A-Z][a-z]..."
-            is_com_interface = (
-                self.name.startswith("I")
-                and len(self.name) > 2
-                and self.name[1].isascii() and self.name[1].isupper()
-                and self.name[2].isascii() and self.name[2].islower()
-            )
-            if is_com_interface:
-                return f"class {meta.name}.{self.name}"
-
-            if any(fptr.name == self.name for fptr in meta.func_ptrs):
-                return f"class {meta.name}.{self.name}"
-
-            return self.name
-
-        return starless_il_type() + (self.stars * "*")
+        return self.starless_il_type(meta) + (self.stars * "*")
 
 class ArgumentDirection(enum.IntEnum):
     IN = 1
@@ -422,7 +437,10 @@ class CollectorState:
                         raise ValueError(f"file {txt_path} line {line_number}: \"arg\" entry without a previous \"func\" or \"fptr\" entry")
                     (direction_str, name, arg_type, arg_stars_str) = pieces[1:5]
                     attribs_str = pieces[5] if len(pieces) > 5 else ""
-                    arg_stars = int(arg_stars_str)
+                    try:
+                        arg_stars = int(arg_stars_str)
+                    except ValueError as ve:
+                        raise ValueError(f"file {txt_path} line {line_number}: invalid number of stars") from ve
                     direction = {
                         "in": ArgumentDirection.IN,
                         "out": ArgumentDirection.OUT,
@@ -536,6 +554,7 @@ class CollectorState:
                 if pieces[0] == "sct":
                     if len(pieces) != 2:
                         raise ValueError(f"file {txt_path} line {line_number}: Usage: sct NAME")
+                    name = pieces[1]
                     self.struct = Struct(name)
                     self.meta.structs.append(self.struct)
                     continue
@@ -543,7 +562,15 @@ class CollectorState:
                 if pieces[0] == "fld":
                     if len(pieces) != 4:
                         raise ValueError(f"file {txt_path} line {line_number}: Usage: fld NAME FIELDTYPE FIELDSTARS")
-                    raise NotImplementedError("TODO")
+                    if self.struct is None:
+                        raise ValueError(f"file {txt_path} line {line_number}: \"fld\" entry without a previous \"sct\" entry")
+                    (name, fld_type_str, fld_stars_str) = pieces[1:4]
+                    fld_stars = int(fld_stars_str)
+                    self.struct.fields.append(StructField(
+                        name,
+                        MetaType(fld_type_str, fld_stars),
+                    ))
+                    continue
 
                 raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
 
