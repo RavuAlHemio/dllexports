@@ -1,0 +1,10 @@
+sct	CStreamFileProps
+fld	Size	uint64	0
+fld	VolID	uint64	0
+fld	FileID_Low	uint64	0
+fld	FileID_High	uint64	0
+fld	NumLinks	uint32	0
+fld	Attrib	uint32	0
+fld	CTime	FILETIME	0
+fld	ATime	FILETIME	0
+fld	MTime	FILETIME	0
