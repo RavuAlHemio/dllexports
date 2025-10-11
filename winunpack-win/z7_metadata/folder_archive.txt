@@ -4,10 +4,10 @@ arg	in	indices	uint32	1	const ca1
 arg	in	numItems	uint32	0
 arg	in	includeAltStreams	int32	0
 arg	in	replaceAltStreamCharsMode	int32	0
-arg	in	pathMode	NPathMode	0
-arg	in	overwriteMode	NOverwriteMode	0
+arg	in	pathMode	NExtract.NPathMode	0
+arg	in	overwriteMode	NExtract.NOverwriteMode	0
 arg	in	path	char	1
-arg	in	testMode	int32	0
+arg	in	testMode	NArchive.NExtract.NAskMode	0
 arg	in	extractCallback2	IFolderArchiveExtractCallback	1
 
 iface	IInFolderArchive	1	14	IUnknown
@@ -37,10 +37,10 @@ smet	BindToRootFolder
 arg	out	resultFolder	IFolderFolder	2	com_out
 
 smet	Extract
-arg	in	pathMode	NPathMode	0
-arg	in	overwriteMode	NOverwriteMode	0
+arg	in	pathMode	NExtract.NPathMode	0
+arg	in	overwriteMode	NExtract.NOverwriteMode	0
 arg	in	path	char	1	const
-arg	in	testMode	int32	0
+arg	in	testMode	NArchive.NExtract.NAskMode	0
 arg	in	extractCallback2	IFolderArchiveExtractCallback	1
 
 iface	IFolderArchiveUpdateCallback	1	11	IProgress
@@ -83,7 +83,7 @@ oarg	in	processedPaths	void	1
 arg	in	codecs	void	1
 arg	in	index	int32	0
 oarg	in	outArchiveStream	ISequentialOutStream	1
-arg	in	stateActions	uint8	1	const cc7
+arg	in	stateActions	NUpdateArchive.NPairAction	1	const cc7
 oarg	in	sfxModule	char	1	const
 oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
 
@@ -92,7 +92,7 @@ smet	DoOperation2
 oarg	in	requestedPaths	void	1
 oarg	in	processedPaths	void	1
 oarg	in	outArchiveStream	ISequentialOutStream	1
-arg	in	stateActions	uint8	1	const cc7
+arg	in	stateActions	NUpdateArchive.NPairAction	1	const cc7
 oarg	in	sfxModule	char	1	const
 oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
 
@@ -131,7 +131,7 @@ arg	in	isDir	int32	0
 
 iface	IFolderSetZoneIdMode	1	18	IUnknown
 smet	SetZoneIdMode
-arg	in	zoneMode	NZoneIdMode	0
+arg	in	zoneMode	NExtract.NZoneIdMode	0
 
 iface	IFolderSetZoneIdFile	1	19	IUnknown
 smet	SetZoneIdFile
@@ -163,7 +163,7 @@ arg	in	existSize	uint64	1	const
 arg	in	newName	char	1	const
 arg	in	newTime	FILETIME	1	const
 arg	in	newSize	uint64	1	const
-arg	out	answer	int32	1
+arg	out	answer	NOverwriteAnswer	1
 
 smet	PrepareOperation
 arg	in	name	char	1	const
@@ -175,7 +175,7 @@ smet	MessageError
 arg	in	message	char	1	const
 
 smet	SetOperationResult
-arg	in	opRes	int32	0
+arg	in	opRes	NArchive.NExtract.NOperationResult	0
 arg	in	encrypted	int32	0
 
 iface	IFolderArchiveExtractCallback2	1	8	IUnknown
@@ -210,6 +210,6 @@ smet	PrepareOperation7
 arg	in	askExtractMode	int32	0
 
 smet	SetOperationResult8
-arg	in	resultEOperationResult	NOperationResult	0
+arg	in	resultEOperationResult	NArchive.NExtract.NOperationResult	0
 arg	in	encrypted	int32	0
 arg	in	size	uint64	0

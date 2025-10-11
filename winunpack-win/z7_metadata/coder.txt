@@ -23,13 +23,13 @@ oarg	in	progress	ICompressProgressInfo	1
 
 iface	ICompressSetCoderPropertiesOpt	4	31	IUnknown
 smet	SetCoderPropertiesOpt
-arg	in	propIDs	PROPID	1	ca2 const
+arg	in	propIDs	NCoderPropID	1	ca2 const
 arg	in	props	PROPVARIANT	1	ca2 const
 arg	in	numProps	uint32	0
 
 iface	ICompressSetCoderProperties	4	32	IUnknown
 smet	SetCoderProperties
-arg	in	propIDs	PROPID	1	ca2 const
+arg	in	propIDs	NCoderPropID	1	ca2 const
 arg	in	props	PROPVARIANT	1	ca2 const
 arg	in	numProps	uint32	0
 

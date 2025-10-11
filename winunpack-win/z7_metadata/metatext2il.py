@@ -174,6 +174,9 @@ TEMPLATE = """
 .class public auto ansi sealed {{ meta.name }}.{{ enum.name }}
        extends [netstandard]System.Enum
 {
+  {% if enum.is_flags -%}
+  .custom instance void [netstandard]System.FlagsAttribute::.ctor() = ( 01 00 00 00 )
+  {% endif %}
   .field public specialname rtspecialname {{ enum.base_type.il_type(meta) }} value__
   {% for variant in enum.name_to_variant.values() %}
   .field public static literal valuetype {{ meta.name }}.{{ enum.name }} {{ variant.name }} = {{ enum.base_type.il_type(meta) }}({{ variant.value }})
@@ -341,12 +344,13 @@ class EnumVariant:
 
 
 class Enumeration:
-    def __init__(self, name: str, base_type: MetaType) -> None:
+    def __init__(self, name: str, base_type: MetaType, is_flags: bool) -> None:
         if base_type.stars != 0:
             raise ValueError("enumeration base type must have 0 stars")
 
         self.name: str = name
         self.base_type: MetaType = base_type
+        self.is_flags: bool = is_flags
         self.name_to_variant: Dict[str, EnumVariant] = {}
 
 class StructField:
@@ -560,13 +564,13 @@ class CollectorState:
                     self.collect_path(sub_txt_name)
                     continue
 
-                if pieces[0] == "enum":
+                if pieces[0] in ("enum", "fenum"):
                     if len(pieces) != 3:
-                        raise ValueError(f"file {txt_path} line {line_number}: Usage: enum NAME BASETYPE")
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: [f]enum NAME BASETYPE")
                     (name, basetype_str) = pieces[1:3]
                     if name in self.meta.name_to_enum:
                         raise ValueError(f"file {txt_path} line {line_number}: duplicate enum named {name!r}")
-                    self.enum = Enumeration(name, MetaType(basetype_str, 0))
+                    self.enum = Enumeration(name, MetaType(basetype_str, 0), pieces[0] == "fenum")
                     self.meta.name_to_enum[self.enum.name] = self.enum
                     continue
 
