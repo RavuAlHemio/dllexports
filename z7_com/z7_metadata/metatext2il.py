@@ -388,6 +388,7 @@ class Metadata:
     def __init__(self, name: str, version: str) -> None:
         self.name: str = name
         self.version: str = version
+        self.namespace: str = name
         self.funcs: List[Function] = []
         self.func_ptrs: List[FunctionPointerType] = []
         self.interfaces: List[Interface] = []
@@ -616,6 +617,12 @@ class CollectorState:
                         name,
                         guid,
                     ))
+                    continue
+
+                if pieces[0] == "nsp":
+                    if len(pieces) != 2:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: nsp NAME")
+                    self.meta.namespace = pieces[1]
                     continue
 
                 raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
