@@ -11,3 +11,4 @@ Windows.Win32.winmd
 ilasm.exe
 # not required but you might have it next to ilasm:
 ildasm.exe
+Windows.Win32.il
