@@ -7,5 +7,6 @@ members = [
     "filtexp",
     "winunpack-macros",
     "winunpack-win",
+    "z7_com",
 ]
 resolver = "2"
