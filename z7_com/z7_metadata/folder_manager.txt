@@ -1,11 +1,11 @@
 iface	IFolderManager	9	5	IUnknown
 
 smet	OpenFolderFile
-arg	in	inStream	IInStream	1
+arg	in	inStream	IInStream	0
 arg	in	filePath	char	1	const
 arg	in	arcFormat	char	1	const
-arg	out	resultFolder	IFolderFolder	2	com_out
-arg	in	progress	IProgress	1
+arg	out	resultFolder	IFolderFolder	1	com_out
+arg	in	progress	IProgress	0
 
 smet	GetExtensions
 arg	out	extensions	BSTR	1

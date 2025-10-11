@@ -23,7 +23,7 @@ arg	in	propID	EHandlerPropID	0
 arg	out	val	PROPVARIANT	1
 
 fn	GetHashers	HRESULT	0
-arg	out	hashers	IHashers	2	com_out
+arg	out	hashers	IHashers	1	com_out
 
 fn	GetIsArc	HRESULT	0
 arg	in	formatIndex	uint32	0
@@ -48,6 +48,6 @@ fn	SetCaseSensitive	HRESULT	0
 arg	in	caseSensitive	BOOL	1
 
 fn	SetCodecs	HRESULT	0
-arg	in	compressCodecsInfo	ICompressCodecsInfo	1
+arg	in	compressCodecsInfo	ICompressCodecsInfo	0
 
 fn	SetLargePageMode	HRESULT	0

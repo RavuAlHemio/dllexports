@@ -5,21 +5,21 @@ oarg	in	outSize	uint64	1
 
 iface	ICompressCoder	4	5	IUnknown
 smet	Code
-arg	in	inStream	ISequentialInStream	1
-arg	in	outStream	ISequentialOutStream	1
+arg	in	inStream	ISequentialInStream	0
+arg	in	outStream	ISequentialOutStream	0
 oarg	in	inSize	uint64	1	const
 oarg	in	outSize	uint64	1	const
-oarg	in	progress	ICompressProgressInfo	1
+oarg	in	progress	ICompressProgressInfo	0
 
 iface	ICompressCoder2	4	24	IUnknown
 smet	Code
-arg	in	inStreams	ISequentialInStream	2	ca2
+arg	in	inStreams	ISequentialInStream	1	ca2
 arg	in	inSizes	uint64	2	const ca2
 arg	in	numInStreams	uint32	0
-arg	in	outStreams	ISequentialOutStream	2	ca5
+arg	in	outStreams	ISequentialOutStream	1	ca5
 arg	in	outSizes	uint64	2	const ca5
 arg	in	numOutStreams	uint32	0
-oarg	in	progress	ICompressProgressInfo	1
+oarg	in	progress	ICompressProgressInfo	0
 
 iface	ICompressSetCoderPropertiesOpt	4	31	IUnknown
 smet	SetCoderPropertiesOpt
@@ -40,7 +40,7 @@ arg	in	size	uint32	0
 
 iface	ICompressWriteCoderProperties	4	35	IUnknown
 smet	WriteCoderProperties
-arg	in	outStream	ISequentialOutStream	1
+arg	in	outStream	ISequentialOutStream	0
 
 iface	ICompressGetInStreamProcessedSize	4	36	IUnknown
 smet	GetInStreamProcessedSize
@@ -77,14 +77,14 @@ arg	out	value	uint64	1
 iface	ICompressSetInStream	4	49	IUnknown
 
 smet	SetInStream
-arg	in	inStream	ISequentialInStream	1
+arg	in	inStream	ISequentialInStream	0
 
 smet	ReleaseInStream
 
 iface	ICompressSetInStream	4	50	IUnknown
 
 smet	SetOutStream
-arg	in	outStream	ISequentialOutStream	1
+arg	in	outStream	ISequentialOutStream	0
 
 smet	ReleaseOutStream
 
@@ -109,7 +109,7 @@ iface	ICompressSetInStream2	4	55	IUnknown
 
 smet	SetInStream2
 arg	in	streamIndex	uint32	0
-arg	in	inStream	ISequentialInStream	1
+arg	in	inStream	ISequentialInStream	0
 
 smet	ReleaseInStream2
 arg	in	streamIndex	uint32	0
@@ -144,7 +144,7 @@ arg	out	coder	void	2	com_out
 
 iface	ISetCompressCodecsInfo	4	61	IUnknown
 smet	SetCompressCodecsInfo
-arg	in	compressCodecsInfo	ICompressCodecsInfo	1
+arg	in	compressCodecsInfo	ICompressCodecsInfo	0
 
 iface	ICryptoProperties	4	128	IUnknown
 
@@ -179,7 +179,7 @@ arg	out	value	PROPVARIANT	1
 
 smet	CreateHasher
 arg	in	index	uint32	0
-arg	out	hasher	IHasher	2	com_out
+arg	out	hasher	IHasher	1	com_out
 
 iface	IHasher	4	192	IUnknown
 

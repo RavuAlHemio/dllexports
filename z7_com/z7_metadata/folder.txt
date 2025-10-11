@@ -12,14 +12,14 @@ arg	out	value	PROPVARIANT	1
 
 smet	BindToFolderByIndex
 arg	in	index	uint32	0
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	BindToFolderByName
 arg	in	name	char	1	const
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	BindToParentFolder
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	GetNumberOfProperties
 arg	out	numProperties	uint32	1
@@ -38,11 +38,11 @@ iface	IFolderAltStreams	8	23	IUnknown
 
 smet	BindToAltStreamsByIndex
 arg	in	index	uint32	0
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	BindToAltStreamsByName
 arg	in	name	char	1	const
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	AreAltStreamsSupported
 arg	in	index	uint32	0
@@ -76,21 +76,21 @@ iface	IFolderOperations	8	19	IUnknown
 
 smet	CreateFolder
 arg	in	name	char	1	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 smet	CreateFile
 arg	in	name	char	1	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 smet	Rename
 arg	in	index	uint32	0
 arg	in	newName	char	1	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 smet	Delete
 arg	in	indices	uint32	1	ca1
 arg	in	numItems	uint32	0
-oarg	out	progress	IProgress	1
+oarg	out	progress	IProgress	0
 
 smet	CopyTo
 arg	in	moveMode	int32	0
@@ -99,25 +99,25 @@ arg	in	numItems	uint32	0
 arg	in	includeAltStreams	int32	0
 arg	in	replaceAltStreamCharsMode	int32	0
 arg	in	path	char	1	const
-arg	in	callback	IFolderOperationsExtractCallback	1
+arg	in	callback	IFolderOperationsExtractCallback	0
 
 smet	CopyFrom
 arg	in	moveMode	int32	0
 arg	in	fromFolderPath	char	1	const
 arg	in	itemsPaths	char	2	const ca3
 arg	in	numItems	uint32	0	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 smet	SetProperty
 arg	in	index	uint32	0
 arg	in	propID	PROPID	0
 arg	in	value	PROPVARIANT	1	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 smet	CopyFromFile
 arg	in	index	uint32	0
 arg	in	fullFilePath	char	1	const
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 iface	IFolderGetSystemIconIndex	8	7	IUnknown
 smet	GetSystemIconIndex
@@ -128,16 +128,16 @@ iface	IFolderGetItemFullSize	8	8	IUnknown
 smet	GetItemFullSize
 arg	in	index	uint32	0
 arg	out	value	PROPVARIANT	1
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 iface	IFolderCalcItemFullSize	8	20	IUnknown
 smet	CalcItemFullSize
 arg	in	index	uint32	0
-oarg	in	progress	IProgress	1
+oarg	in	progress	IProgress	0
 
 iface	IFolderClone	8	9	IUnknown
 smet	Clone
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 iface	IFolderSetFlatMode	8	10	IUnknown
 smet	SetFlatMode
@@ -193,7 +193,7 @@ arg	out	varType	VARTYPE	1
 
 iface	IGetFolderArcProps	8	17	IUnknown
 smet	GetFolderArcProps
-arg	out	object	IFolderArcProps	2	com_out
+arg	out	object	IFolderArcProps	1	com_out
 
 iface	IFolderCompare	8	21	IUnknown
 meth	CompareItems	int32	0

@@ -12,7 +12,7 @@ iface	IArchiveExtractCallback	6	32	IProgress
 
 smet	GetStream
 arg	in	index	uint32	0
-arg	out	outStream	ISequentialOutStream	2	com_out
+arg	out	outStream	ISequentialOutStream	1	com_out
 arg	in	askExtractMode	int32	0
 
 smet	PrepareOperation
@@ -35,12 +35,12 @@ arg	out	value	PROPVARIANT	1
 
 smet	GetStream
 arg	in	name	char	1	const
-arg	out	inStream	IInStream	2	com_out
+arg	out	inStream	IInStream	1	com_out
 
 iface	IInArchiveGetStream	6	64	IUnknown
 smet	GetStream
 arg	in	index	uint32	0
-arg	out	stream	ISequentialInStream	2	com_out
+arg	out	stream	ISequentialInStream	1	com_out
 
 iface	IArchiveOpenSetSubArchiveName	6	80	IUnknown
 smet	SetSubArchiveName
@@ -49,9 +49,9 @@ arg	in	name	char	1	const
 iface	IInArchive	6	96	IUnknown
 
 smet	Open
-arg	in	stream	IInStream	1
+arg	in	stream	IInStream	0
 oarg	in	maxCheckStartPosition	uint64	1	const
-oarg	in	openCallback	IArchiveOpenCallback	1
+oarg	in	openCallback	IArchiveOpenCallback	0
 
 smet	Close
 
@@ -67,7 +67,7 @@ smet	Extract
 arg	in	indices	uint32	1	const ca1
 arg	in	numItems	uint32	0
 arg	in	testMode	EAskMode	0
-oarg	in	extractCallback	IArchiveExtractCallback	1
+oarg	in	extractCallback	IArchiveExtractCallback	0
 
 smet	GetArchiveProperty
 arg	in	propID	PROPID	0
@@ -127,7 +127,7 @@ arg	out	propType	uint32	1
 
 iface	IArchiveOpenSeq	6	97	IUnknown
 smet	OpenSeq
-arg	in	stream	ISequentialInStream	1
+arg	in	stream	ISequentialInStream	0
 
 iface	IArchiveUpdateCallback	6	128	IProgress
 
@@ -144,7 +144,7 @@ arg	out	value	PROPVARIANT	1
 
 smet	GetStream
 arg	in	index	uint32	0
-arg	out	inStream	ISequentialInStream	2	com_out
+arg	out	inStream	ISequentialInStream	1	com_out
 
 smet	SetOperationResult
 arg	in	operationResult	EUpdateOperationResult	0
@@ -157,13 +157,13 @@ arg	out	size	uint64	1
 
 smet	GetVolumeStream
 arg	in	index	uint32	0
-arg	out	volumeStream	ISequentialOutStream	2	com_out
+arg	out	volumeStream	ISequentialOutStream	1	com_out
 
 iface	IArchiveUpdateCallbackFile	6	131	IUnknown
 
 smet	GetStream2
 arg	in	index	uint32	0
-arg	out	inStream	ISequentialInStream	2	com_out
+arg	out	inStream	ISequentialInStream	1	com_out
 arg	in	notifyOp	uint32	0
 
 smet	ReportOperation
@@ -180,9 +180,9 @@ arg	out	value	PROPVARIANT	1
 iface	IOutArchive	6	160	IUnknown
 
 smet	UpdateItems
-arg	in	outStream	ISequentialOutStream	1
+arg	in	outStream	ISequentialOutStream	0
 arg	in	numItems	uint32	0
-oarg	in	updateCallback	IArchiveUpdateCallback	1
+oarg	in	updateCallback	IArchiveUpdateCallback	0
 
 smet	GetFileTimeType
 arg	out	type	EFileTimeType	1

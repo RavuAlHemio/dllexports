@@ -8,19 +8,19 @@ arg	in	pathMode	EPathMode	0
 arg	in	overwriteMode	EOverwriteMode	0
 arg	in	path	char	1
 arg	in	testMode	EAskMode	0
-arg	in	extractCallback2	IFolderArchiveExtractCallback	1
+arg	in	extractCallback2	IFolderArchiveExtractCallback	0
 
 iface	IInFolderArchive	1	14	IUnknown
 
 smet	Open
-oarg	in	inStream	IInStream	1
+oarg	in	inStream	IInStream	0
 oarg	in	filePath	char	1	const
 arg	in	arcFormat	char	1	const
 oarg	out	archiveTypeRes	BSTR	1
-oarg	in	openArchiveCallback	IArchiveOpenCallback	1
+oarg	in	openArchiveCallback	IArchiveOpenCallback	0
 
 smet	ReOpen
-oarg	in	openArchiveCallback	IArchiveOpenCallback	1
+oarg	in	openArchiveCallback	IArchiveOpenCallback	0
 
 smet	Close
 
@@ -34,14 +34,14 @@ arg	out	propID	PROPID	1
 arg	out	varType	VARTYPE	1
 
 smet	BindToRootFolder
-arg	out	resultFolder	IFolderFolder	2	com_out
+arg	out	resultFolder	IFolderFolder	1	com_out
 
 smet	Extract
 arg	in	pathMode	EPathMode	0
 arg	in	overwriteMode	EOverwriteMode	0
 arg	in	path	char	1	const
 arg	in	testMode	EAskMode	0
-arg	in	extractCallback2	IFolderArchiveExtractCallback	1
+arg	in	extractCallback2	IFolderArchiveExtractCallback	0
 
 iface	IFolderArchiveUpdateCallback	1	11	IProgress
 
@@ -63,7 +63,7 @@ arg	in	numFiles	uint64	0
 iface	IOutFolderArchive	1	15	IUnknown
 
 smet	SetFolder
-oarg	in	folder	IFolderFolder	1
+oarg	in	folder	IFolderFolder	0
 
 smet	SetFiles
 arg	in	folderPrefix	char	1	const
@@ -71,10 +71,10 @@ oarg	in	names	char	2	const ca2
 arg	in	numNames	uint32	0
 
 smet	DeleteItems
-arg	in	outArchiveStream	ISequentialOutStream	1
+arg	in	outArchiveStream	ISequentialOutStream	0
 oarg	in	indices	uint32	1	const ca2
 arg	in	numItems	uint32	0
-oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	0
 
 smet	DoOperation
 # actually: FStringVector, FStringVector, CCodecs
@@ -82,19 +82,19 @@ oarg	in	requestedPaths	void	1
 oarg	in	processedPaths	void	1
 arg	in	codecs	void	1
 arg	in	index	int32	0
-oarg	in	outArchiveStream	ISequentialOutStream	1
+oarg	in	outArchiveStream	ISequentialOutStream	0
 arg	in	stateActions	EUpdateArchivePairAction	1	const cc7
 oarg	in	sfxModule	char	1	const
-oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	0
 
 smet	DoOperation2
 # actually: FStringVector, FStringVector
 oarg	in	requestedPaths	void	1
 oarg	in	processedPaths	void	1
-oarg	in	outArchiveStream	ISequentialOutStream	1
+oarg	in	outArchiveStream	ISequentialOutStream	0
 arg	in	stateActions	EUpdateArchivePairAction	1	const cc7
 oarg	in	sfxModule	char	1	const
-oarg	in	updateCallback	IFolderArchiveUpdateCallback	1
+oarg	in	updateCallback	IFolderArchiveUpdateCallback	0
 
 iface	IFolderArchiveUpdateCallback2	1	16	IUnknown
 
@@ -202,9 +202,9 @@ arg	out	res	int32	1
 smet	GetStream7
 arg	in	name	char	1	const
 arg	in	isDir	int32	0
-arg	out	outStream	ISequentialOutStream	2	com_out
+arg	out	outStream	ISequentialOutStream	1	com_out
 arg	in	askExtractMode	int32	0
-arg	in	getProp	IGetProp	1
+arg	in	getProp	IGetProp	0
 
 smet	PrepareOperation7
 arg	in	askExtractMode	int32	0
