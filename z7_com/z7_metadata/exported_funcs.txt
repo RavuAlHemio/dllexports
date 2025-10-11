@@ -11,7 +11,7 @@ arg	out	outObject	void	2	com_out
 fn	CreateObject	HRESULT	0
 arg	in	clsid	GUID	1	const
 arg	in	iid	GUID	1	const
-arg	in	outObject	void	2	com_out
+arg	out	outObject	void	2	com_out
 
 fn	GetHandlerProperty	HRESULT	0
 arg	in	propID	EHandlerPropID	0	const
