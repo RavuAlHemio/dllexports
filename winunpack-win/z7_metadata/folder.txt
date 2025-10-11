@@ -49,7 +49,6 @@ arg	in	index	uint32	0
 arg	out	isSupported	int32	1
 
 iface	IFolderWasChanged	8	4	IUnknown
-
 smet	WasChanged
 arg	out	wasChanged	int32	1
 

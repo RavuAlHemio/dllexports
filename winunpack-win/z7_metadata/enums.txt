@@ -76,3 +76,15 @@ vnt	kHashBits	24
 vnt	kNumThreadGroups	25
 vnt	kThreadGroup	26
 vnt	kAffinityInGroup	27
+
+enum	NOperationResult	int32
+vnt	kOK	0
+vnt	kUnsupportedMethod	1
+vnt	kDataError	2
+vnt	kCRCError	3
+vnt	kUnavailable	4
+vnt	kUnexpectedEnd	5
+vnt	kDataAfterEnd	6
+vnt	kIsNotArc	7
+vnt	kHeadersError	8
+vnt	kWrongPassword	9

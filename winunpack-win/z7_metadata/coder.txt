@@ -1,3 +1,127 @@
+iface	ICompressProgressInfo	4	4	IUnknown
+smet	SetRatioInfo
+oarg	in	inSize	uint64	1
+oarg	in	outSize	uint64	1
+
+iface	ICompressCoder	4	5	IUnknown
+smet	Code
+arg	in	inStream	ISequentialInStream	1
+arg	in	outStream	ISequentialOutStream	1
+oarg	in	inSize	uint64	1	const
+oarg	in	outSize	uint64	1	const
+oarg	in	progress	ICompressProgressInfo	1
+
+iface	ICompressCoder2	4	24	IUnknown
+smet	Code
+arg	in	inStreams	ISequentialInStream	2	ca2
+arg	in	inSizes	uint64	2	const ca2
+arg	in	numInStreams	uint32	0
+arg	in	outStreams	ISequentialOutStream	2	ca5
+arg	in	outSizes	uint64	2	const ca5
+arg	in	numOutStreams	uint32	0
+oarg	in	progress	ICompressProgressInfo	1
+
+iface	ICompressSetCoderPropertiesOpt	4	31	IUnknown
+smet	SetCoderPropertiesOpt
+arg	in	propIDs	PROPID	1	ca2 const
+arg	in	props	PROPVARIANT	1	ca2 const
+arg	in	numProps	uint32	0
+
+iface	ICompressSetCoderProperties	4	32	IUnknown
+smet	SetCoderProperties
+arg	in	propIDs	PROPID	1	ca2 const
+arg	in	props	PROPVARIANT	1	ca2 const
+arg	in	numProps	uint32	0
+
+iface	ICompressSetDecoderProperties2	4	34	IUnknown
+smet	SetDecoderProperties2
+arg	in	data	uint8	1	ca1 const
+arg	in	size	uint32	0
+
+iface	ICompressWriteCoderProperties	4	35	IUnknown
+smet	WriteCoderProperties
+arg	in	outStream	ISequentialOutStream	1
+
+iface	ICompressGetInStreamProcessedSize	4	36	IUnknown
+smet	GetInStreamProcessedSize
+arg	out	value	uint64	1
+
+iface	ICompressSetCoderMt	4	37	IUnknown
+smet	SetNumberOfThreads
+arg	in	numThreads	uint32	0
+
+iface	ICompressSetFinishMode	4	38	IUnknown
+smet	SetFinishMode
+arg	in	finishMode	uint32	0
+
+iface	ICompressGetInStreamProcessedSize2	4	39	IUnknown
+smet	GetInStreamProcessedSize2
+arg	in	streamIndex	uint32	0
+arg	out	value	uint64	1
+
+iface	ICompressSetMemLimit	4	40	IUnknown
+smet	SetMemLimit
+arg	in	memUsage	uint64	0
+
+iface	ICompressReadUnusedFromInBuf	4	41	IUnknown
+smet	ReadUnusedFromInBuf
+arg	out	data	void	1	ca1
+arg	in	size	uint32	0
+arg	out	processedSize	uint32	1
+
+iface	ICompressGetSubStreamSize	4	48	IUnknown
+smet	GetSubStreamSize
+arg	in	subStream	uint64	0
+arg	out	value	uint64	1
+
+iface	ICompressSetInStream	4	49	IUnknown
+
+smet	SetInStream
+arg	in	inStream	ISequentialInStream	1
+
+smet	ReleaseInStream
+
+iface	ICompressSetInStream	4	50	IUnknown
+
+smet	SetOutStream
+arg	in	outStream	ISequentialOutStream	1
+
+smet	ReleaseOutStream
+
+iface	ICompressSetOutStreamSize	4	52	IUnknown
+smet	SetOutStreamSize
+arg	in	outSize	uint64	1	const
+
+iface	ICompressSetBufSize	4	53	IUnknown
+
+smet	SetInBufSize
+arg	in	streamIndex	uint32	0
+arg	in	size	uint32	0
+
+smet	SetOutBufSize
+arg	in	streamIndex	uint32	0
+arg	in	size	uint32	0
+
+iface	ICompressInitEncoder	4	54	IUnknown
+smet	InitEncoder
+
+iface	ICompressSetInStream2	4	55	IUnknown
+
+smet	SetInStream2
+arg	in	streamIndex	uint32	0
+arg	in	inStream	ISequentialInStream	1
+
+smet	ReleaseInStream2
+arg	in	streamIndex	uint32	0
+
+iface	ICompressFilter	4	64	IUnknown
+
+smet	Init
+
+meth	Filter	uint32	0
+arg	inout	data	uint8	1	ca1
+arg	in	size	uint32	0
+
 iface	ICompressCodecsInfo	4	96	IUnknown
 
 smet	GetNumMethods
@@ -17,6 +141,32 @@ smet	CreateEncoder
 arg	in	index	uint32	0
 arg	in	iid	GUID	1	const
 arg	out	coder	void	2	com_out
+
+iface	ISetCompressCodecsInfo	4	61	IUnknown
+smet	SetCompressCodecsInfo
+arg	in	compressCodecsInfo	ICompressCodecsInfo	1
+
+iface	ICryptoProperties	4	128	IUnknown
+
+smet	SetKey
+arg	in	data	uint8	1	const ca1
+arg	in	size	uint32	0
+
+smet	SetInitVector
+arg	in	data	uint8	1	const ca1
+arg	in	size	uint32	0
+
+iface	ICryptoResetInitVector	4	140	IUnknown
+smet	ResetInitVector
+
+iface	ICryptoSetPassword	4	144	IUnknown
+smet	CryptoSetPassword
+arg	in	data	uint8	1	const ca1
+arg	in	size	uint32	0
+
+iface	ICryptoSetCRC	4	160	IUnknown
+smet	CryptoSetCRC
+arg	in	crc	uint32	0
 
 iface	IHashers	4	193	IUnknown
 

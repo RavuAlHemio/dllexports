@@ -4,6 +4,7 @@ import argparse
 import enum
 import re
 from typing import Dict, FrozenSet, Iterable, List, Optional, Set
+import uuid
 import jinja2
 
 
@@ -117,7 +118,7 @@ TEMPLATE = """
 }
 {% endfor %}{# meta.func_ptrs #}
 
-{% if meta.funcs -%}
+{% if meta.funcs or meta.guid_consts -%}
 .class public auto autochar abstract sealed beforefieldinit {{ meta.name }}.Apis
     extends [netstandard]System.Object
 {
@@ -129,6 +130,14 @@ TEMPLATE = """
     {
         {{ output_arg_attributes(func.args) }}
     }
+    {% endfor %}
+    {% for guid_const in meta.guid_consts -%}
+    .field public static valuetype [netstandard]System.Guid '{{ guid_const.name }}'
+    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.GuidAttribute::.ctor(
+        uint32, uint16, uint16, uint8, uint8, uint8, uint8, uint8, uint8, uint8, uint8) = (
+            01 00
+            {{ guid_const.guid_bytes_le|hex_bytes }} // {{ guid_const.guid_str }}
+            00 00 )
     {% endfor %}
 }
 {% endif %}{# meta.funcs #}
@@ -350,6 +359,27 @@ class Struct:
         self.name: str = name
         self.fields: List[StructField] = []
 
+class GuidConst:
+    def __init__(self, name: str, guid: uuid.UUID) -> None:
+        self.name: str = name
+        self.guid: uuid.UUID = guid
+
+    @property
+    def guid_str(self):
+        return f"{self.guid.time_low:08X}-{self.guid.time_mid:04X}-{self.guid.time_hi_version:04X}-{self.guid.clock_seq_hi_variant:02X}{self.guid.clock_seq_low:02X}-{self.guid.node:012X}"
+
+    @property
+    def guid_bytes_le(self):
+        return b"".join((
+            self.guid.time_low.to_bytes(length=4, byteorder="little"),
+            self.guid.time_mid.to_bytes(length=2, byteorder="little"),
+            self.guid.time_hi_version.to_bytes(length=2, byteorder="little"),
+            # and a byte sequence from here on out
+            self.guid.clock_seq_hi_variant.to_bytes(length=1, byteorder="big"),
+            self.guid.clock_seq_low.to_bytes(length=1, byteorder="big"),
+            self.guid.node.to_bytes(length=6, byteorder="big"),
+        ))
+
 class Metadata:
     def __init__(self, name: str, version: str) -> None:
         self.name: str = name
@@ -359,6 +389,7 @@ class Metadata:
         self.interfaces: List[Interface] = []
         self.structs: List[Struct] = []
         self.name_to_enum: Dict[str, Enumeration] = {}
+        self.guid_consts: List[GuidConst] = []
 
 class CollectorState:
     def __init__(self) -> None:
@@ -572,15 +603,31 @@ class CollectorState:
                     ))
                     continue
 
+                if pieces[0] == "gconst":
+                    if len(pieces) != 3:
+                        raise ValueError(f"file {txt_path} line {line_number}: Usage: gconst NAME GUIDSTR")
+                    (name, guid_str) = pieces[1:3]
+                    guid = uuid.UUID(guid_str)
+                    self.meta.guid_consts.append(GuidConst(
+                        name,
+                        guid,
+                    ))
+                    continue
+
                 raise ValueError(f"file {txt_path} line {line_number}: unknown command {pieces[0]!r}")
 
 
+def hex_bytes(bs: bytes) -> str:
+    return " ".join(f"{b:02X}" for b in bs)
+
+
 def pascal_str_hex_bytes(text: str) -> str:
-    length = len(text)
+    encoded = text.encode("utf-8")
+    length = len(encoded)
     # not sure if there's a multibyte encoding where the top bit is set, so cut off at 127
     if length > 127:
         raise ValueError("text too long for Pascal string")
-    text_hex = " ".join(f"{b:02X}" for b in text.encode("utf-8"))
+    text_hex = hex_bytes(encoded)
     return f"{length:02X} {text_hex}"
 
 
@@ -597,6 +644,7 @@ def run(txt_path: str, il_path: str) -> None:
     env = jinja2.Environment(
         undefined=jinja2.StrictUndefined,
     )
+    env.filters["hex_bytes"] = hex_bytes
     env.filters["pascal_str_hex_bytes"] = pascal_str_hex_bytes
     env.filters["hex_bytes_le"] = hex_bytes_le
     tpl = env.from_string(TEMPLATE)

@@ -177,3 +177,39 @@ arg	in	message	char	1	const
 smet	SetOperationResult
 arg	in	opRes	int32	0
 arg	in	encrypted	int32	0
+
+iface	IFolderArchiveExtractCallback2	1	8	IUnknown
+smet	ReportExtractResult
+arg	in	opRes	int32	0
+arg	in	encrypted	int32	0
+arg	in	name	char	1	const
+
+iface	IArchiveFolderInternal	1	12	IUnknown
+smet	GetAgentFolder
+# technically CAgentFolder**:
+arg	out	agentFolder	void	2	com_out
+
+iface	IGetProp	1	32	IUnknown
+smet	GetProp
+arg	in	propID	PROPID	0
+arg	out	value	PROPVARIANT	1
+
+iface	IFolderExtractToStreamCallback	1	49	IUnknown
+
+smet	UseExtractToStream
+arg	out	res	int32	1
+
+smet	GetStream7
+arg	in	name	char	1	const
+arg	in	isDir	int32	0
+arg	out	outStream	ISequentialOutStream	2	com_out
+arg	in	askExtractMode	int32	0
+arg	in	getProp	IGetProp	1
+
+smet	PrepareOperation7
+arg	in	askExtractMode	int32	0
+
+smet	SetOperationResult8
+arg	in	resultEOperationResult	NOperationResult	0
+arg	in	encrypted	int32	0
+arg	in	size	uint64	0

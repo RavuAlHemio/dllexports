@@ -1,6 +1,7 @@
 meta	IgorPavlov.SevenZip	0:0:0:0
 dll	7z.dll
 
+inc	consts.txt
 inc	enums.txt
 inc	exported_funcs.txt
 inc	func_pointers.txt
@@ -11,5 +12,6 @@ inc	coder.txt
 inc	folder.txt
 inc	folder_archive.txt
 inc	folder_manager.txt
+inc	password.txt
 inc	progress.txt
 inc	stream.txt
