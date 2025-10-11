@@ -4,7 +4,7 @@ If ($LASTEXITCODE -ne 0) {
     Exit $LASTEXITCODE
 }
 
-# metadata.il -> metadata.winmd
+# metadata.il -> IgorPavlov.SevenZip.winmd
 
 If (-not (Test-Path -Path ".\ilasm.exe")) {
     Write-Error -Message "
@@ -27,4 +27,4 @@ simply download the .nuget file and extract it using a ZIP-capable program."
     Exit 1
 }
 
-& .\ilasm.exe /dll /output=metadata.winmd metadata.il
+& .\ilasm.exe /dll /output=IgorPavlov.SevenZip.winmd metadata.il
