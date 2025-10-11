@@ -14,12 +14,12 @@ arg	in	iid	GUID	1	const
 arg	in	outObject	void	2	com_out
 
 fn	GetHandlerProperty	HRESULT	0
-arg	in	propID	NArchive.NHandlerPropID	0	const
+arg	in	propID	EHandlerPropID	0	const
 arg	out	val	PROPVARIANT	1
 
 fn	GetHandlerProperty2	HRESULT	0
 arg	in	formatIndex	uint32	0
-arg	in	propID	NArchive.NHandlerPropID	0
+arg	in	propID	EHandlerPropID	0
 arg	out	val	PROPVARIANT	1
 
 fn	GetHashers	HRESULT	0
@@ -31,11 +31,11 @@ arg	out	isArc	Func_IsArc	1
 
 fn	GetMethodProperty	HRESULT	0
 arg	in	codecIndex	uint32	0
-arg	in	propID	NMethodPropID	0
+arg	in	propID	EMethodPropID	0
 arg	out	val	PROPVARIANT	1
 
 fn	GetModuleProp	HRESULT	0
-arg	in	propID	NModulePropID	0
+arg	in	propID	EModulePropID	0
 arg	out	val	PROPVARIANT	1
 
 fn	GetNumberOfFormats	HRESULT	0

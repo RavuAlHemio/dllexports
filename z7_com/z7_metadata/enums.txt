@@ -1,23 +1,23 @@
-enum	NExtract.NPathMode	int32
+enum	EPathMode	int32
 vnt	kFullPaths	0
 vnt	kCurPaths	1
 vnt	kNoPaths	2
 vnt	kAbsPaths	3
 vnt	kNoPathsAlt	4
 
-enum	NExtract.NOverwriteMode	int32
+enum	EOverwriteMode	int32
 vnt	kAsk	0
 vnt	kOverwrite	1
 vnt	kSkip	2
 vnt	kRename	3
 vnt	kRenameExisting	4
 
-enum	NExtract.NZoneIdMode	int32
+enum	EZoneIdMode	int32
 vnt	kNone	0
 vnt	kAll	1
 vnt	kOffice	2
 
-enum	NOverwriteAnswer	int32
+enum	EOverwriteAnswer	int32
 vnt	kYes	0
 vnt	kYesToAll	1
 vnt	kNo	2
@@ -25,14 +25,14 @@ vnt	kNoToAll	3
 vnt	kAutoRename	4
 vnt	kCancel	5
 
-enum	NFileTimeType	uint32
+enum	EFileTimeType	uint32
 vnt	kNotDefined	4294967295
 vnt	kWindows	0
 vnt	kUnix	1
 vnt	kDOS	2
 vnt	k1ns	3
 
-enum	NArchive.NHandlerPropID	PROPID
+enum	EHandlerPropID	PROPID
 vnt	kName	0
 vnt	kClassID	1
 vnt	kExtension	2
@@ -47,7 +47,7 @@ vnt	kNtSecure	10
 vnt	kFlags	11
 vnt	kTimeFlags	12
 
-enum	NCoderPropID	PROPID
+enum	ECoderPropID	PROPID
 vnt	kDefaultProp	0
 vnt	kDictionarySize	1
 vnt	kUsedMemorySize	2
@@ -77,7 +77,7 @@ vnt	kNumThreadGroups	25
 vnt	kThreadGroup	26
 vnt	kAffinityInGroup	27
 
-enum	NExtract.NOperationResult	int32
+enum	EExtractOperationResult	int32
 vnt	kOK	0
 vnt	kUnsupportedMethod	1
 vnt	kDataError	2
@@ -89,7 +89,7 @@ vnt	kIsNotArc	7
 vnt	kHeadersError	8
 vnt	kWrongPassword	9
 
-enum	NMethodPropID	PROPID
+enum	EMethodPropID	PROPID
 vnt	kID	0
 vnt	kName	1
 vnt	kDecoder	2
@@ -102,11 +102,11 @@ vnt	kEncoderIsAssigned	8
 vnt	kDigestSize	9
 vnt	kIsFilter	10
 
-enum	NModulePropID	PROPID
+enum	EModulePropID	PROPID
 vnt	kInterfaceType	0
 vnt	kVersion	1
 
-fenum	NArcInfoFlags	uint32
+fenum	EArcInfoFlags	uint32
 vnt	kKeepName	1
 vnt	kAltStreams	2
 vnt	kNtSecure	4
@@ -128,38 +128,26 @@ vnt	kATime_Default	131072
 vnt	kMTime	262144
 vnt	kMTime_Default	524288
 
-enum	NArchive.NExtract.NAskMode	int32
+enum	EAskMode	int32
 vnt	kExtract	0
 vnt	kTest	1
 vnt	kSkip	2
 vnt	kReadExternal	3
 
-enum	NArchive.NExtract.NOperationResult	int32
-vnt	kOK	0
-vnt	kUnsupportedMethod	1
-vnt	kDataError	2
-vnt	kCRCError	3
-vnt	kUnavailable	4
-vnt	kUnexpectedEnd	5
-vnt	kDataAfterEnd	6
-vnt	kIsNotArc	7
-vnt	kHeadersError	8
-vnt	kWrongPassword	9
-
-enum	NArchive.NEventIndexType	uint32
+enum	EEventIndexType	uint32
 vnt	kNoIndex	0
 vnt	kInArcIndex	1
 vnt	kBlockIndex	2
 vnt	kOutArcIndex	3
 
-enum	NArchive.NUpdate.NOperationResult	int32
+enum	EUpdateOperationResult	int32
 vnt	kOK	0
 
-enum	NParentType	uint32
+enum	EParentType	uint32
 vnt	kDir	0
 vnt	kAltStream	1
 
-enum	NUpdateNotifyOp	uint32
+enum	EUpdateNotifyOp	uint32
 vnt	kAdd	0
 vnt	kUpdate	1
 vnt	kAnalyze	2
@@ -171,7 +159,7 @@ vnt	kHeader	7
 vnt	kHashRead	8
 vnt	kInFileChanged	9
 
-fenum	NRequestMemoryUseFlags	uint32
+fenum	ERequestMemoryUseFlags	uint32
 vnt	k_AllowedSize_WasForced	1
 vnt	k_DefaultLimit_Exceeded	2
 vnt	k_MLimit_Exceeded	4
@@ -181,13 +169,13 @@ vnt	k_IsReport	2048
 vnt	k_SkipArc_IsExpected	4096
 vnt	k_Report_SkipArc	8192
 
-fenum	NRequestMemoryAnswerFlags	uint32
+fenum	ERequestMemoryAnswerFlags	uint32
 vnt	k_Allow	1
 vnt	k_Stop	2
 vnt	k_SkipArc	4
 vnt	k_Limit_Exceeded	1024
 
-enum	NExitCode	uint32
+enum	EExitCode	uint32
 vnt	kSuccess	0
 vnt	kWarning	1
 vnt	kFatalError	2
@@ -195,7 +183,7 @@ vnt	kUserError	7
 vnt	kMemoryError	8
 vnt	kUserBreak	255
 
-enum	NUpdateArchive.NPairState	uint32
+enum	EUpdateArchivePairState	uint32
 vnt	kNotMasked	0
 vnt	kOnlyInArchive	1
 vnt	kOnlyOnDisk	2
@@ -204,7 +192,7 @@ vnt	kOldInArchive	4
 vnt	kSameFiles	5
 vnt	kUnknowNewerFiles	6
 
-enum	NUpdateArchive.NPairAction	uint8
+enum	EUpdateArchivePairAction	uint8
 vnt	kIgnore	0
 vnt	kCopy	1
 vnt	kCompress	2

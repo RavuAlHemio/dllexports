@@ -19,7 +19,7 @@ smet	PrepareOperation
 arg	in	askExtractMode	int32	0
 
 smet	SetOperationResult
-arg	in	opRes	NArchive.NExtract.NOperationResult	0
+arg	in	opRes	EExtractOperationResult	0
 
 iface	IArchiveExtractCallbackMessage2	6	34	IUnknown
 smet	ReportExtractResult
@@ -66,7 +66,7 @@ arg	out	value	PROPVARIANT	1
 smet	Extract
 arg	in	indices	uint32	1	const ca1
 arg	in	numItems	uint32	0
-arg	in	testMode	NArchive.NExtract.NAskMode	0
+arg	in	testMode	EAskMode	0
 oarg	in	extractCallback	IArchiveExtractCallback	1
 
 smet	GetArchiveProperty
@@ -96,7 +96,7 @@ iface	IArchiveGetRawProps	6	112	IUnknown
 smet	GetParent
 arg	in	index	uint32	0
 arg	out	parent	uint32	1
-arg	out	parentType	NParentType	1
+arg	out	parentType	EParentType	1
 
 smet	GetRawProp
 arg	in	index	uint32	0
@@ -147,7 +147,7 @@ arg	in	index	uint32	0
 arg	out	inStream	ISequentialInStream	2	com_out
 
 smet	SetOperationResult
-arg	in	operationResult	NArchive.NUpdate.NOperationResult	0
+arg	in	operationResult	EUpdateOperationResult	0
 
 iface	IArchiveUpdateCallback2	6	130	IArchiveUpdateCallback
 
@@ -167,9 +167,9 @@ arg	out	inStream	ISequentialInStream	2	com_out
 arg	in	notifyOp	uint32	0
 
 smet	ReportOperation
-arg	in	indexType	NArchive.NEventIndexType	0
+arg	in	indexType	EEventIndexType	0
 arg	in	index	uint32	0
-arg	in	notifyOp	NUpdateNotifyOp	0
+arg	in	notifyOp	EUpdateNotifyOp	0
 
 iface	IArchiveGetDiskProperty	6	132	IUnknown
 smet	GetDiskProperty
@@ -185,7 +185,7 @@ arg	in	numItems	uint32	0
 oarg	in	updateCallback	IArchiveUpdateCallback	1
 
 smet	GetFileTimeType
-arg	out	type	NFileTimeType	1
+arg	out	type	EFileTimeType	1
 
 iface	ISetProperties	6	3	IUnknown
 smet	SetProperties
@@ -202,10 +202,10 @@ arg	in	allowTail	int32	0
 
 iface	IArchiveRequestMemoryUseCallback	6	9	IUnknown
 smet	RequestMemoryUse
-arg	in	flags	NRequestMemoryUseFlags	0
-arg	in	indexType	NArchive.NEventIndexType	0
+arg	in	flags	ERequestMemoryUseFlags	0
+arg	in	indexType	EEventIndexType	0
 arg	in	index	uint32	0
 arg	in	path	char	1	const
 arg	in	requiredSize	uint64	0
 arg	out	allowedSize	uint64	1
-arg	inout	answerFlags	NRequestMemoryAnswerFlags	1
+arg	inout	answerFlags	ERequestMemoryAnswerFlags	1
