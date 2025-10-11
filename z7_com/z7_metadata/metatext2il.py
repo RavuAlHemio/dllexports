@@ -53,9 +53,9 @@ TEMPLATE = """
                     )
                 {% endif %}
                 {% if arg.arg_type.base_enum is not none -%}
-                    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.AssociatedEnumAttribute::.ctor() = (
+                    .custom instance void [Windows.Win32.winmd]Windows.Win32.Foundation.Metadata.AssociatedEnumAttribute::.ctor(string) = (
                         01 00
-                        {{ arg.arg_type.base_enum|pascal_str_hex_bytes }} // {{ arg.arg_type.base_enum }}
+                        {{ arg.arg_type.base_enum|ser_string_hex_bytes }} // {{ arg.arg_type.base_enum }}
                         00 00
                     )
                 {% endif %}
@@ -625,14 +625,30 @@ def hex_bytes(bs: bytes) -> str:
     return " ".join(f"{b:02X}" for b in bs)
 
 
-def pascal_str_hex_bytes(text: str) -> str:
+def ser_string_hex_bytes(text: str) -> str:
     encoded = text.encode("utf-8")
     length = len(encoded)
-    # not sure if there's a multibyte encoding where the top bit is set, so cut off at 127
-    if length > 127:
-        raise ValueError("text too long for Pascal string")
+
+    if length <= 0x7F:
+        # 0xxx_xxxx
+        length_str = f"{length:02X}"
+    elif length <= 0x3FFF:
+        # 10xx_xxxx xxxx_xxxx
+        top_byte = (((length >> 8) & 0x3F) | 0b1000_0000)
+        bottom_byte = ((length >> 0) & 0xFF)
+        length_str = f"{top_byte:02X} {bottom_byte:02X}"
+    elif length <= 0x1FFFFFFF:
+        # 110x_xxxx xxxx_xxxx xxxx_xxxx xxxx_xxxx
+        msb = (((length >> 24) & 0x1F) | 0b1100_0000)
+        mb1sb = ((length >> 16) & 0xFF)
+        mb2sb = ((length >>  8) & 0xFF)
+        lsb = ((length >>  0) & 0xFF)
+        length_str = f"{msb:02X} {mb1sb:02X} {mb2sb:02X} {lsb:02X}"
+    else:
+        raise ValueError("text too long for SerString")
+
     text_hex = hex_bytes(encoded)
-    return f"{length:02X} {text_hex}"
+    return f"{length_str} {text_hex}"
 
 
 def hex_bytes_le(number: int, byte_count: int) -> str:
@@ -649,7 +665,7 @@ def run(txt_path: str, il_path: str) -> None:
         undefined=jinja2.StrictUndefined,
     )
     env.filters["hex_bytes"] = hex_bytes
-    env.filters["pascal_str_hex_bytes"] = pascal_str_hex_bytes
+    env.filters["ser_string_hex_bytes"] = ser_string_hex_bytes
     env.filters["hex_bytes_le"] = hex_bytes_le
     tpl = env.from_string(TEMPLATE)
 
