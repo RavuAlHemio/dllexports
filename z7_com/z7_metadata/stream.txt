@@ -14,14 +14,14 @@ iface	IInStream	3	3	ISequentialInStream
 smet	Seek
 arg	in	offset	int64	0
 arg	in	seekOrigin	uint32	0
-arg	out	newPosition	uint64	1
+oarg	out	newPosition	uint64	1
 
 iface	IOutStream	3	4	ISequentialOutStream
 
 smet	Seek
 arg	in	offset	int64	0
 arg	in	seekOrigin	uint32	0
-arg	out	newPosition	uint64	1
+oarg	out	newPosition	uint64	1
 
 smet	SetSize
 arg	in	newSize	uint64	0
