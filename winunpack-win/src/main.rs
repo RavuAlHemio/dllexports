@@ -1,20 +1,36 @@
+mod extractor;
 mod rust_7z_stream;
+mod temp_file;
 
 
-use std::{ffi::c_void, sync::Mutex};
-use std::fs::File;
+use std::ffi::{c_void, OsString};
+use std::fs::{File, OpenOptions};
+use std::os::windows::ffi::OsStringExt;
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::ptr::null_mut;
+use std::sync::Mutex;
 
 use clap::Parser;
+use windows::Win32::Foundation::{GENERIC_READ, NTSTATUS};
+use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Variant::VT_BSTR;
 use windows_core::{GUID, HRESULT, implement, Interface, s, Type, w};
 use z7_com::{
-    FormatUdf, IArchiveOpenCallback, IArchiveOpenCallback_Impl, IInArchive, IInStream, kpidPath,
+    FormatUdf, FormatWim, IArchiveExtractCallback, IArchiveOpenCallback, IArchiveOpenCallback_Impl,
+    IInArchive, IInStream, kExtract, kpidPath,
 };
 
+use crate::extractor::Extractor;
 use crate::rust_7z_stream::Rust7zInStream;
+use crate::temp_file::TempFile;
+
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn RtlGetLastNtStatus() -> NTSTATUS;
+}
 
 
 #[derive(Parser)]
@@ -128,8 +144,87 @@ fn main() {
     let (install_index, install_is_esd) = install_index_esd_opt
         .expect("ISO does not contain sources\\install.(wim|esd)");
 
+    // extract it to a temp file
+    let wim_temp_file = TempFile::create();
+    let wim_path_words = wim_temp_file.path_nul_terminated();
+    let wim_path = OsString::from_wide(&wim_path_words[..wim_path_words.len()-1]);
+    let temp_writer = wim_temp_file.open_to_write();
+
+    let extractor = Extractor::new(
+        install_index,
+        temp_writer,
+    );
+    let extract_callback = IArchiveExtractCallback::from(extractor);
+
+    println!("extracting install.(wim|esd) to {}", wim_path.display());
+
+    unsafe {
+        iso_in_archive.Extract(
+            &[install_index],
+            kExtract,
+            &extract_callback,
+        )
+    }
+        .expect("install.(wim|esd) extraction failed");
+
+    println!("install.(wim|esd) extracted");
+    drop(extract_callback);
+
+    // load the WIM file now
+    let mut wim_in_archive_raw: *mut c_void = null_mut();
+    unsafe {
+        create_object(
+            &FormatWim,
+            &IInArchive::IID,
+            &mut wim_in_archive_raw,
+        )
+    }
+        .ok()
+        .expect("failed to create WIM archive object");
+    let wim_in_archive: IInArchive = unsafe {
+        Type::from_abi(wim_in_archive_raw)
+    }
+        .expect("failed to convert WIM archive object");
+
+    let f_res = OpenOptions::new()
+        .access_mode(GENERIC_READ.0)
+        .share_mode((FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE).0)
+        .open(&wim_path);
+    let f = match f_res {
+        Ok(f) => f,
+        Err(e) => {
+            // obtain anything
+            let lnts = unsafe { RtlGetLastNtStatus() };
+            panic!("failed to open WIM file; error: {}; last NT status: {}", e, lnts.0);
+        },
+    };
+    let stream = Rust7zInStream::new(Mutex::new(Box::new(f)));
+    unsafe {
+        wim_in_archive.Open(
+            &IInStream::from(stream),
+            None,
+            &IArchiveOpenCallback::from(DisinterestedOpenCallback),
+        )
+    }
+        .expect("failed to load WIM");
+
+    let item_count = unsafe {
+        wim_in_archive.GetNumberOfItems()
+    }
+        .expect("failed to obtain number of items");
+
+    println!("WIM item count: {}", item_count);
+
+    // only drop the temp file down here
+    drop(wim_temp_file);
+
+    unsafe {
+        wim_in_archive.Close()
+    }
+        .expect("failed to close WIM");
+
     unsafe {
         iso_in_archive.Close()
     }
-        .expect("failed to close archive");
+        .expect("failed to close ISO");
 }

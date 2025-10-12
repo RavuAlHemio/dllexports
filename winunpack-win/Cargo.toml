@@ -14,5 +14,8 @@ z7_com = { path = "../z7_com" }
 version = "0.62"
 features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
 ]
