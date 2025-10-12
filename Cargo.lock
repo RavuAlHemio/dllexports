@@ -997,21 +997,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
-name = "winunpack-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
 name = "winunpack-win"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "from-to-repr",
  "windows",
  "windows-core",
- "winunpack-macros",
+ "windows-implement",
+ "z7_com",
 ]
 
 [[package]]
@@ -1024,7 +1018,9 @@ checksum = "5c573471f125075647d03df72e026074b7203790d41351cd6edc96f46bcccd36"
 name = "z7_com"
 version = "0.1.0"
 dependencies = [
+ "windows",
  "windows-bindgen",
+ "windows-core",
 ]
 
 [[package]]
