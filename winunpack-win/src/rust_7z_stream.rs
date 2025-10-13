@@ -1,5 +1,5 @@
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use windows::Win32::System::Com::{STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET};
@@ -194,5 +194,37 @@ impl IOutStream_Impl for Rust7zOutStream_Impl {
         // shrug
         let _ = new_size;
         Ok(())
+    }
+}
+
+#[implement(ISequentialOutStream)]
+pub struct MemorySequentialOutStream {
+    inner: Arc<Mutex<Vec<u8>>>,
+}
+impl MemorySequentialOutStream {
+    pub fn new(inner: Arc<Mutex<Vec<u8>>>) -> Self {
+        Self {
+            inner,
+        }
+    }
+
+    pub fn lock<'a>(&'a self) -> MutexGuard<'a, Vec<u8>> {
+        self.inner.lock()
+            .expect("failed to lock mutex")
+    }
+}
+impl ISequentialOutStream_Impl for MemorySequentialOutStream_Impl {
+    fn Write(&self, data: *const core::ffi::c_void, size: u32) -> windows_core::Result<u32> {
+        let data_u8 = data as *const u8;
+        let size_usize: usize = size.try_into().unwrap();
+        let data_slice = unsafe {
+            std::slice::from_raw_parts(data_u8, size_usize)
+        };
+
+        let mut guard = self.inner
+            .lock().expect("failed to lock mutex");
+        guard.extend(data_slice);
+
+        Ok(size)
     }
 }

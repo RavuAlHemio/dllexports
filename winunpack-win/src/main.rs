@@ -3,15 +3,17 @@ mod rust_7z_stream;
 mod temp_file;
 
 
+use std::collections::BTreeMap;
 use std::ffi::{c_void, OsString};
 use std::fs::{File, OpenOptions};
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::ptr::null_mut;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use clap::Parser;
+use sxd_document::{Package, QName};
 use windows::Win32::Foundation::{GENERIC_READ, NTSTATUS};
 use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
@@ -22,7 +24,7 @@ use z7_com::{
     IInArchive, IInStream, kExtract, kpidPath,
 };
 
-use crate::extractor::Extractor;
+use crate::extractor::{SingleFileExtractor, SingleFileToMemoryExtractor};
 use crate::rust_7z_stream::Rust7zInStream;
 use crate::temp_file::TempFile;
 
@@ -124,7 +126,7 @@ fn main() {
         let path_var = unsafe {
             iso_in_archive.GetProperty(index, kpidPath.0)
         }
-            .expect("failed to obtain property 0 (path)");
+            .expect("failed to obtain path property value");
         assert_eq!(path_var.vt(), VT_BSTR);
         let path_bstr = unsafe {
             &path_var.Anonymous.Anonymous.Anonymous.bstrVal
@@ -150,7 +152,7 @@ fn main() {
     let wim_path = OsString::from_wide(&wim_path_words[..wim_path_words.len()-1]);
     let temp_writer = wim_temp_file.open_to_write();
 
-    let extractor = Extractor::new(
+    let extractor = SingleFileExtractor::new(
         install_index,
         temp_writer,
     );
@@ -215,13 +217,155 @@ fn main() {
 
     println!("WIM item count: {}", item_count);
 
-    // only drop the temp file down here
-    drop(wim_temp_file);
+    // find XML file, Windows/System32/ and Windows/SysWoW64/ files
+    let mut xml_file_index_opt: Option<u32> = None;
+    let mut paths_indexes: Vec<(String, u32)> = Vec::new();
+    for index in 0..item_count {
+        let path_var = unsafe {
+            wim_in_archive.GetProperty(index, kpidPath.0)
+        }
+            .expect("failed to obtain path property value");
+        assert_eq!(path_var.vt(), VT_BSTR);
+        let path_bstr = unsafe {
+            &path_var.Anonymous.Anonymous.Anonymous.bstrVal
+        };
+        let Ok(path_string): Result<String, _> = (&**path_bstr).try_into() else {
+            continue;
+        };
+        let path_lower = path_string.to_lowercase();
+        if path_lower == "[1].xml" {
+            xml_file_index_opt = Some(index);
+        }
+        paths_indexes.push((path_string, index));
+    }
+
+    let Some(xml_file_index) = xml_file_index_opt else {
+        panic!("WIM file does not contain XML definition");
+    };
+
+    // find the most interesting Windows variant in the XML file
+    let xml_memory_holder: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let xml_extractor = SingleFileToMemoryExtractor::new(
+        xml_file_index,
+        Arc::clone(&xml_memory_holder),
+    );
+    let extractor_callback = IArchiveExtractCallback::from(xml_extractor);
+
+    unsafe {
+        wim_in_archive.Extract(
+            &[xml_file_index],
+            kExtract,
+            &extractor_callback,
+        )
+    }
+        .expect("failed to extract XML");
+
+    let xml_bytes = {
+        let guard = xml_memory_holder
+            .lock().expect("failed to lock mutex");
+        (*guard).clone()
+    };
+    let xml_str = std::str::from_utf8(&xml_bytes)
+        .expect("WIM XML is not UTF-8");
+    let xml_pkg = sxd_document::parser::parse(xml_str)
+        .expect("failed to parse WIM XML");
+    let image_elems: Vec<_> = xml_pkg
+        .as_document()
+        .root()
+        .children()
+        .into_iter()
+        .filter_map(|cor| cor.element())
+        .nth(0)
+        .expect("WIM XML has no root element")
+        .children()
+        .into_iter()
+        .filter_map(|imgn| imgn.element())
+        .filter(|imge| imge.name() == QName::new("IMAGE"))
+        .collect();
+
+    let mut index_edition = Vec::with_capacity(image_elems.len());
+    for image_elem in image_elems {
+        let image_index = image_elem.attribute_value("INDEX")
+            .expect("<IMAGE> element without INDEX attribute");
+        let edition_id: String = image_elem
+            .children().into_iter()
+            .filter_map(|n| n.element())
+            .filter(|e| e.name() == QName::new("WINDOWS"))
+            .nth(0)
+            .expect("<IMAGE> element without <WINDOWS> child element")
+            .children().into_iter()
+            .filter_map(|n| n.element())
+            .filter(|e| e.name() == QName::new("EDITIONID"))
+            .nth(0)
+            .expect("<WINDOWS> element without <EDITIONID> child element")
+            .children().into_iter()
+            .filter_map(|n| n.text())
+            .map(|t| t.text())
+            .collect();
+        index_edition.push((image_index.to_string(), edition_id));
+    }
+
+    // editions with most features per version:
+    // Vista, 7: "Ultimate"
+    // 8, 10, 11: "Professional" (but this has fewer features than "Ultimate" on Vista and 7)
+    // => "Ultimate", then "Professional"
+
+    let ultimate_index = index_edition
+        .iter()
+        .filter(|(_idx, ed)| ed == "Ultimate")
+        .map(|(idx, _ed)| idx)
+        .nth(0);
+    let pro_index = index_edition
+        .iter()
+        .filter(|(_idx, ed)| ed == "Professional")
+        .map(|(idx, _ed)| idx)
+        .nth(0);
+    let best_index = ultimate_index
+        .or(pro_index)
+        .expect("found neither Ultimate nor Professional edition");
+
+    // pick out the files that we are interested in
+    let wanted_prefixes = vec![
+        format!("{}\\windows\\system32\\", best_index),
+        format!("{}\\windows\\syswow64\\", best_index),
+    ];
+    let mut wanted_file_indexes_names = Vec::new();
+    for (path, index) in paths_indexes {
+        let path_lower = path.to_lowercase();
+        let extract_this = wanted_prefixes
+            .iter()
+            .any(|pfx| path_lower.starts_with(pfx));
+        if !extract_this {
+            continue;
+        }
+
+        // strip off the initial chunk (the index)
+        let (_index_chunk, extract_path) = path.split_once("\\")
+            .expect("split_once failed");
+        wanted_file_indexes_names.push((index, extract_path.to_owned()));
+    }
+
+    let wanted_file_indexes: Vec<u32> = wanted_file_indexes_names
+        .iter()
+        .map(|(idx, _path)| *idx)
+        .collect();
+    let index_to_extract_path: BTreeMap<u32, String> = wanted_file_indexes_names
+        .into_iter()
+        .collect();
+
+    for (index, extract_path) in &index_to_extract_path {
+        println!("{} {}", index, extract_path);
+    }
+
+    todo!("perform extraction from WIM");
 
     unsafe {
         wim_in_archive.Close()
     }
         .expect("failed to close WIM");
+
+    // delete the WIM temp file
+    drop(wim_temp_file);
 
     unsafe {
         iso_in_archive.Close()

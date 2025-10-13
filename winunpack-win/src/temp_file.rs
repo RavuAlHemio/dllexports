@@ -3,7 +3,7 @@ use std::os::windows::io::FromRawHandle;
 use std::sync::LazyLock;
 
 use windows::core::{PCWSTR, s, w};
-use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, GetTempFileNameW, OPEN_EXISTING,
@@ -31,7 +31,6 @@ static GET_TEMP_PATH_W: LazyLock<unsafe extern "system" fn(buffer_length: u32, b
 #[derive(Debug, Eq, PartialEq)]
 pub struct TempFile {
     path_nul_terminated: Vec<u16>,
-    file_handle: HANDLE,
 }
 impl TempFile {
     pub fn create() -> Self {
@@ -39,7 +38,7 @@ impl TempFile {
         let buf_size_usize: usize = buf_size_u32.try_into().unwrap();
         let mut buf = vec![0u16; buf_size_usize];
 
-        // 1. find the location of the temp directory
+        // find the location of the temp directory
         let temp_count = unsafe {
             GET_TEMP_PATH_W(buf_size_u32, buf.as_mut_ptr())
         };
@@ -52,7 +51,7 @@ impl TempFile {
 
         let mut temp_file_name = [0u16; 260];
 
-        // 2. create a temp file there
+        // create a temp file there
         let temp_number = unsafe {
             GetTempFileNameW(
                 PCWSTR(buf.as_ptr()),
@@ -70,22 +69,8 @@ impl TempFile {
         let mut actual_temp_file_name = temp_file_name[0..nul_pos].to_vec();
         actual_temp_file_name.push(0x0000);
 
-        // 3. open a handle to it, marking it for deletion once the last handle is closed
-        let temp_file_handle = unsafe {
-            CreateFileW(
-                PCWSTR(actual_temp_file_name.as_ptr()),
-                0,
-                FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
-                None,
-            )
-        }
-            .expect("failed to open temp file");
         Self {
             path_nul_terminated: actual_temp_file_name,
-            file_handle: temp_file_handle,
         }
     }
 
@@ -100,7 +85,7 @@ impl TempFile {
                 FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
                 None,
                 OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+                FILE_ATTRIBUTE_NORMAL,
                 None,
             )
         }
@@ -120,13 +105,21 @@ impl TempFile {
 }
 impl Drop for TempFile {
     fn drop(&mut self) {
-        println!("dropping temp file");
-
-        // if drop gets called, close the handle
-        // if drop never gets called, the handle is closed on exit
-        // either way, the file is then deleted if this is the last handle
+        // mark the file for deletion -- hopefully this covers most cases
+        let temp_file_handle = unsafe {
+            CreateFileW(
+                PCWSTR(self.path_nul_terminated.as_ptr()),
+                0,
+                FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+                None,
+            )
+        }
+            .expect("failed to open temp file");
         let _ = unsafe {
-            CloseHandle(self.file_handle)
+            CloseHandle(temp_file_handle)
         };
     }
 }
