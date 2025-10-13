@@ -13,18 +13,18 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
-use sxd_document::{Package, QName};
+use sxd_document::QName;
 use windows::Win32::Foundation::{GENERIC_READ, NTSTATUS};
 use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::Win32::System::Variant::VT_BSTR;
+use windows::Win32::System::Variant::{VT_BOOL, VT_BSTR};
 use windows_core::{GUID, HRESULT, implement, Interface, s, Type, w};
 use z7_com::{
     FormatUdf, FormatWim, IArchiveExtractCallback, IArchiveOpenCallback, IArchiveOpenCallback_Impl,
-    IInArchive, IInStream, kExtract, kpidPath,
+    IInArchive, IInStream, kExtract, kpidIsDir, kpidPath,
 };
 
-use crate::extractor::{SingleFileExtractor, SingleFileToMemoryExtractor};
+use crate::extractor::{MultiFileExtractor, SingleFileExtractor, SingleFileToMemoryExtractor};
 use crate::rust_7z_stream::Rust7zInStream;
 use crate::temp_file::TempFile;
 
@@ -38,6 +38,7 @@ unsafe extern "system" {
 #[derive(Parser)]
 struct Opts {
     pub iso_path: PathBuf,
+    pub out_path: PathBuf,
 }
 
 
@@ -143,7 +144,7 @@ fn main() {
             break;
         }
     }
-    let (install_index, install_is_esd) = install_index_esd_opt
+    let (install_index, _install_is_esd) = install_index_esd_opt
         .expect("ISO does not contain sources\\install.(wim|esd)");
 
     // extract it to a temp file
@@ -169,7 +170,7 @@ fn main() {
     }
         .expect("install.(wim|esd) extraction failed");
 
-    println!("install.(wim|esd) extracted");
+    println!("install.(wim|esd) extracted; loading");
     drop(extract_callback);
 
     // load the WIM file now
@@ -221,6 +222,20 @@ fn main() {
     let mut xml_file_index_opt: Option<u32> = None;
     let mut paths_indexes: Vec<(String, u32)> = Vec::new();
     for index in 0..item_count {
+        // directory? ignore it
+        let is_dir_var = unsafe {
+            wim_in_archive.GetProperty(index, kpidIsDir.0)
+        }
+            .expect("failed to obtain is-dir property value");
+        assert_eq!(is_dir_var.vt(), VT_BOOL);
+        let is_dir = unsafe {
+            is_dir_var.Anonymous.Anonymous.Anonymous.boolVal.as_bool()
+        };
+        if is_dir {
+            continue;
+        }
+
+        // obtain the path
         let path_var = unsafe {
             wim_in_archive.GetProperty(index, kpidPath.0)
         }
@@ -232,6 +247,7 @@ fn main() {
         let Ok(path_string): Result<String, _> = (&**path_bstr).try_into() else {
             continue;
         };
+
         let path_lower = path_string.to_lowercase();
         if path_lower == "[1].xml" {
             xml_file_index_opt = Some(index);
@@ -265,9 +281,14 @@ fn main() {
             .lock().expect("failed to lock mutex");
         (*guard).clone()
     };
-    let xml_str = std::str::from_utf8(&xml_bytes)
-        .expect("WIM XML is not UTF-8");
-    let xml_pkg = sxd_document::parser::parse(xml_str)
+    let xml_words: Vec<u16> = xml_bytes
+        .chunks(2)
+        .skip(1)
+        .map(|ch| u16::from_le_bytes(ch.try_into().unwrap()))
+        .collect();
+    let xml_str = String::from_utf16(&xml_words)
+        .expect("WIM XML is not UTF-16");
+    let xml_pkg = sxd_document::parser::parse(&xml_str)
         .expect("failed to parse WIM XML");
     let image_elems: Vec<_> = xml_pkg
         .as_document()
@@ -353,11 +374,20 @@ fn main() {
         .into_iter()
         .collect();
 
-    for (index, extract_path) in &index_to_extract_path {
-        println!("{} {}", index, extract_path);
-    }
+    let extractor = MultiFileExtractor::new(
+        opts.out_path.clone(),
+        index_to_extract_path,
+    );
+    let extractor_callback = IArchiveExtractCallback::from(extractor);
 
-    todo!("perform extraction from WIM");
+    unsafe {
+        wim_in_archive.Extract(
+            &wanted_file_indexes,
+            kExtract,
+            &extractor_callback,
+        )
+    }
+        .expect("extraction failed");
 
     unsafe {
         wim_in_archive.Close()

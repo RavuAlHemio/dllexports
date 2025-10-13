@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::S_FALSE;
@@ -119,6 +121,84 @@ impl IArchiveExtractCallback_Impl for SingleFileToMemoryExtractor_Impl {
         let seq_stream = ISequentialOutStream::from(mem_out_stream);
         out_stream.write(Some(seq_stream))
             .expect("failed to set output stream");
+        Ok(())
+    }
+
+    fn PrepareOperation(&self, _ask_extract_mode: i32) -> windows_core::Result<()> {
+        Ok(())
+    }
+
+    fn SetOperationResult(
+        &self,
+        _opres: &z7_com::EExtractOperationResult,
+    ) -> windows_core::Result<()> {
+        Ok(())
+    }
+}
+
+
+#[implement(IArchiveExtractCallback)]
+pub struct MultiFileExtractor {
+    parent_dir_path: PathBuf,
+    index_to_extract_path: BTreeMap<u32, String>,
+}
+impl MultiFileExtractor {
+    pub fn new(
+        parent_dir_path: PathBuf,
+        index_to_extract_path: BTreeMap<u32, String>,
+    ) -> Self {
+        Self {
+            parent_dir_path,
+            index_to_extract_path,
+        }
+    }
+
+    pub fn parent_dir_path(&self) -> &Path { &self.parent_dir_path }
+    pub fn index_to_extract_path(&self) -> &BTreeMap<u32, String> { &self.index_to_extract_path }
+}
+impl IProgress_Impl for MultiFileExtractor_Impl {
+    fn SetTotal(&self, _total: u64) -> windows_core::Result<()> {
+        Ok(())
+    }
+
+    fn SetCompleted(&self, _complete_value: *const u64) -> windows_core::Result<()> {
+        Ok(())
+    }
+}
+impl IArchiveExtractCallback_Impl for MultiFileExtractor_Impl {
+    fn GetStream(
+        &self,
+        index: u32,
+        out_stream: OutRef<ISequentialOutStream>,
+        _ask_extract_mode: i32,
+    ) -> windows_core::Result<()> {
+        let Some(extract_path) = self.index_to_extract_path.get(&index) else {
+            // not interested
+            return Err(windows_core::Error::from(S_FALSE));
+        };
+        let mut dest_path = self.parent_dir_path.clone();
+        for piece in extract_path.split("\\") {
+            dest_path.push(piece);
+        }
+
+        println!("{}", dest_path.display());
+
+        let dest_dir = dest_path.parent().unwrap();
+        let dest_dir_exists = std::fs::exists(dest_dir)
+            .expect("failed to check existence of output dir");
+        if !dest_dir_exists {
+            std::fs::create_dir_all(dest_dir)
+                .expect("failed to create output dir");
+        }
+
+        let inner_file = File::create(&dest_path)
+            .expect("failed to create output file");
+
+        let rust_out_stream = Rust7zOutStream::new(Mutex::new(Box::new(
+            inner_file,
+        )));
+        let isos = ISequentialOutStream::from(IOutStream::from(rust_out_stream));
+        out_stream.write(Some(isos))?;
         Ok(())
     }
 
