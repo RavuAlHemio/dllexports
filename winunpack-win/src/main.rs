@@ -360,6 +360,10 @@ fn main() {
             continue;
         }
 
+        if path_lower.ends_with(".wim") {
+            continue;
+        }
+
         // strip off the initial chunk (the index)
         let (_index_chunk, extract_path) = path.split_once("\\")
             .expect("split_once failed");
