@@ -10,7 +10,7 @@ fi
 # metadata.il -> IgorPavlov.SevenZip.winmd
 if [ ! -x "./ilasm" ]
 then
-	echo >&2 <<_END
+	cat >&2 <<_END
 You are missing ilasm in the current directory.
 
 You can obtain it from the NuGet package "runtime.linux-x64.Microsoft.NETCore.ILAsm"
@@ -22,7 +22,7 @@ fi
 
 if [ ! -f "./Windows.Win32.winmd" ]
 then
-	echo >&2 <<_END
+	cat >&2 <<_END
 You are missing Windows.Win32.winmd in the current directory.
 
 You can obtain it from the NuGet package "Microsoft.Windows.SDK.Win32Metadata";
