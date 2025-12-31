@@ -3,6 +3,7 @@ IgorPavlov.SevenZip.winmd
 
 # intermediate artifacts
 metadata.il
+__pycache__/
 
 # dependencies
 Windows.Win32.winmd
