@@ -1,34 +1,38 @@
 mod extractor;
 mod rust_7z_stream;
 mod temp_file;
+mod z7_loader;
 
 
 use std::collections::BTreeMap;
 use std::ffi::{c_void, OsString};
 use std::fs::{File, OpenOptions};
-use std::os::windows::ffi::OsStringExt;
-use std::os::windows::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use sxd_document::QName;
-use windows::Win32::Foundation::{GENERIC_READ, NTSTATUS};
-use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::Win32::System::Variant::{VT_BOOL, VT_BSTR};
-use windows_core::{GUID, HRESULT, implement, Interface, s, Type, w};
+use windows_sys::Win32::System::Variant::{VT_BOOL, VT_BSTR};
+use windows_core::{implement, Interface, Type};
+/*
 use z7_com::{
     FormatUdf, FormatWim, IArchiveExtractCallback, IArchiveOpenCallback, IArchiveOpenCallback_Impl,
     IInArchive, IInStream, kExtract, kpidIsDir, kpidPath,
 };
+*/
+use z7_com::IArchiveOpenCallback_Vtbl;
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::NTSTATUS;
 
 use crate::extractor::{MultiFileExtractor, SingleFileExtractor, SingleFileToMemoryExtractor};
 use crate::rust_7z_stream::Rust7zInStream;
 use crate::temp_file::TempFile;
 
 
+#[cfg(target_os = "windows")]
 #[link(name = "ntdll")]
 unsafe extern "system" {
     fn RtlGetLastNtStatus() -> NTSTATUS;
@@ -42,27 +46,36 @@ struct Opts {
 }
 
 
-type CreateObject = unsafe extern "system" fn(
-    cls_id: *const GUID,
-    iid: *const GUID,
-    out_object: *mut *mut c_void,
-) -> HRESULT;
-
-
-#[implement(IArchiveOpenCallback)]
 struct DisinterestedOpenCallback;
-impl IArchiveOpenCallback_Impl for DisinterestedOpenCallback_Impl {
-    fn SetTotal(&self, files: *const u64, bytes: *const u64) -> windows_core::Result<()> {
-        let _ = files;
-        let _ = bytes;
-        Ok(())
+
+#[repr(C)]
+struct DisinterestedOpenCallback_Vtbl {
+    vt: IArchiveOpenCallback_Vtbl,
+}
+impl DisinterestedOpenCallback_Vtbl {
+    pub fn new() -> Self {
+        Self {
+            vt: IArchiveOpenCallback_Vtbl {
+            },
+        }
     }
 
-    fn SetCompleted(
-        &self,
+    unsafe extern "system" fn SetTotal(
+        me: *mut c_void,
         files: *const u64,
         bytes: *const u64,
-    ) -> windows_core::Result<()> {
+    ) -> HRESULT {
+        let _ = me;
+        let _ = files;
+        let _ = bytes;
+        S_OK
+    }
+
+    unsafe extern "system" fn SetCompleted(
+        me: *mut c_void,
+        files: *const u64,
+        bytes: *const u64,
+    ) -> HRESULT {
         let _ = files;
         let _ = bytes;
         Ok(())
@@ -70,23 +83,32 @@ impl IArchiveOpenCallback_Impl for DisinterestedOpenCallback_Impl {
 }
 
 
+#[cfg(target_os = "windows")]
+fn open_read_full_share(path: &Path) -> Result<File, io::Error> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Foundation::GENERIC_READ;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    OpenOptions::new()
+        .access_mode(GENERIC_READ.0)
+        .share_mode((FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE).0)
+        .open(path)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_read_full_share(path: &Path) -> Result<File, io::Error> {
+    OpenOptions::new()
+        .read(true)
+        .write(false)
+        .open(path)
+}
+
+
 fn main() {
     let opts = Opts::parse();
 
-    let hmodule = unsafe {
-        LoadLibraryW(w!("7z.dll"))
-    }
-        .expect("failed to load 7z.dll");
-    let create_object_raw = unsafe {
-        GetProcAddress(
-            hmodule,
-            s!("CreateObject"),
-        )
-    }
-        .expect("failed to import CreateObject from 7z.dll");
-    let create_object: CreateObject = unsafe {
-        std::mem::transmute(create_object_raw)
-    };
+    let create_object = crate::z7_loader::get_fn_create_object();
 
     // open the ISO (UDF) file
     let mut iso_in_archive_raw: *mut c_void = null_mut();
@@ -149,8 +171,7 @@ fn main() {
 
     // extract it to a temp file
     let wim_temp_file = TempFile::create();
-    let wim_path_words = wim_temp_file.path_nul_terminated();
-    let wim_path = OsString::from_wide(&wim_path_words[..wim_path_words.len()-1]);
+    let wim_path = wim_temp_file.path();
     let temp_writer = wim_temp_file.open_to_write();
 
     let extractor = SingleFileExtractor::new(
@@ -189,16 +210,22 @@ fn main() {
     }
         .expect("failed to convert WIM archive object");
 
-    let f_res = OpenOptions::new()
-        .access_mode(GENERIC_READ.0)
-        .share_mode((FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE).0)
-        .open(&wim_path);
+    let f_res = open_read_full_share(&wim_path);
     let f = match f_res {
         Ok(f) => f,
         Err(e) => {
             // obtain anything
-            let lnts = unsafe { RtlGetLastNtStatus() };
-            panic!("failed to open WIM file; error: {}; last NT status: {}", e, lnts.0);
+
+            #[cfg(target_os = "windows")]
+            {
+                let lnts = unsafe { RtlGetLastNtStatus() };
+                panic!("failed to open WIM file; error: {}; last NT status: {}", e, lnts.0);
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                panic!("failed to open WIM file; error: {}", e);
+            }
         },
     };
     let stream = Rust7zInStream::new(Mutex::new(Box::new(f)));

@@ -37,11 +37,12 @@ fn ensure_winmd() {
             concat!("z7_metadata", path_sep!(), "IgorPavlov.SevenZip.winmd"),
             concat!("z7_metadata", path_sep!(), "Windows.Win32.winmd"),
         "--reference",
-            "windows,skip-root,Windows",
+            "windows_sys,skip-root,Windows",
         "--out",
             concat!("src", path_sep!(), "bindings.rs"),
         "--filter",
             "IgorPavlov.SevenZip",
+        "--sys",
         "--no-deps",
     ]);
 

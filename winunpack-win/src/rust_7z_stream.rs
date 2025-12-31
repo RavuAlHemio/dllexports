@@ -1,13 +1,15 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
-use windows::Win32::System::Com::{STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET};
+use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+use windows_sys::Win32::System::Com::{STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET};
 use windows_implement::implement;
+/*
 use z7_com::{
     IInStream, IInStream_Impl, IOutStream, IOutStream_Impl, ISequentialInStream,
     ISequentialInStream_Impl, ISequentialOutStream, ISequentialOutStream_Impl,
 };
+*/
 
 
 macro_rules! impl_read {

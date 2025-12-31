@@ -3,12 +3,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use windows::Win32::Foundation::S_FALSE;
+use windows_sys::Win32::Foundation::S_FALSE;
 use windows_core::{implement, OutRef};
-use z7_com::{
-    IArchiveExtractCallback, IArchiveExtractCallback_Impl, IOutStream, IProgress_Impl,
-    ISequentialOutStream,
-};
+use z7_com::IArchiveExtractCallback_Vtbl;
 
 use crate::rust_7z_stream::{MemorySequentialOutStream, Rust7zOutStream};
 
@@ -29,25 +26,50 @@ impl SingleFileExtractor {
     pub fn index(&self) -> u32 { self.index }
     pub fn into_inner(self) -> Mutex<Option<File>> { self.destination }
 }
-impl IProgress_Impl for SingleFileExtractor_Impl {
-    fn SetTotal(&self, _total: u64) -> windows_core::Result<()> {
-        Ok(())
+
+#[repr(C)]
+pub struct SingleFileExtractor_Iface {
+    vtbl: IArchiveExtractCallback_Vtbl,
+    boxy: Option<Arc<Box<SingleFileExtractor>>>,
+    rcnt: usize,
+}
+impl SingleFileExtractor_Vtbl {
+    pub fn new(inner: Arc<Box<SingleFileExtractor>>) -> Self {
+        Self {
+            boxy: Some(inner),
+            rcnt: 0,
+            vtbl: IArchiveExtractCallback_Vtbl {
+            },
+        }
     }
 
-    fn SetCompleted(&self, _complete_value: *const u64) -> windows_core::Result<()> {
-        Ok(())
+    unsafe extern "system" fn SetTotal(
+        me: *mut c_void,
+        total: u64,
+    ) -> HRESULT {
+        let _ = me;
+        let _ = total;
+        S_OK
     }
-}
-impl IArchiveExtractCallback_Impl for SingleFileExtractor_Impl {
-    fn GetStream(
-        &self,
+
+    unsafe extern "system" fn SetCompleted(
+        me: *mut c_void,
+        complete_value: u64,
+    ) -> HRESULT {
+        let _ = me;
+        let _ = complete_value;
+        S_OK
+    }
+
+    unsafe extern "system" fn GetStream(
+        me: *mut c_void,
         index: u32,
-        out_stream: OutRef<ISequentialOutStream>,
+        out_stream: *mut *mut ISequentialOutStream,
         _ask_extract_mode: i32,
-    ) -> windows_core::Result<()> {
+    ) -> HRESULT {
         if index != self.index {
             // not interested
-            return Err(windows_core::Error::from(S_FALSE));
+            return S_FALSE;
         }
 
         let inner_file_opt = {
@@ -56,27 +78,30 @@ impl IArchiveExtractCallback_Impl for SingleFileExtractor_Impl {
             guard.take()
         };
         let Some(inner_file) = inner_file_opt else {
-            return Err(windows_core::Error::from(S_FALSE));
+            return S_FALSE;
         };
 
         let rust_out_stream = Rust7zOutStream::new(Mutex::new(Box::new(
             inner_file,
         )));
+        let rust_out_stream_box = Arc::new(Box::new(rust_out_stream));
         let isos = ISequentialOutStream::from(IOutStream::from(rust_out_stream));
         out_stream.write(Some(isos))?;
         Ok(())
     }
 
-    fn PrepareOperation(&self, _ask_extract_mode: i32) -> windows_core::Result<()> {
+    unsafe extern "system" fn PrepareOperation(&self, _ask_extract_mode: i32) -> windows_core::Result<()> {
         Ok(())
     }
 
-    fn SetOperationResult(
+    unsafe extern "system" fn SetOperationResult(
         &self,
         _opres: &z7_com::EExtractOperationResult,
     ) -> windows_core::Result<()> {
         Ok(())
     }
+}
+impl IArchiveExtractCallback_Impl for SingleFileExtractor_Impl {
 }
 
 
