@@ -81,7 +81,7 @@ arg	in	inStream	ISequentialInStream	0
 
 smet	ReleaseInStream
 
-iface	ICompressSetInStream	4	50	IUnknown
+iface	ICompressSetOutStream	4	50	IUnknown
 
 smet	SetOutStream
 arg	in	outStream	ISequentialOutStream	0
