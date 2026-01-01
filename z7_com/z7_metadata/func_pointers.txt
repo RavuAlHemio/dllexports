@@ -1,3 +1,0 @@
-fptr	Func_IsArc	uint32	0
-arg	in	p	uint8	1	const
-arg	in	size	size_t	0
