@@ -96,6 +96,9 @@ enum PokeExeMode {
 
     /// Outputs general information about an NT4-era .DBG file.
     Nt4DbgInfo(DebugFileArgs),
+
+    /// Outputs Common Language Runtime resources.
+    ClrResources(InputFileOnlyArgs),
 }
 
 #[derive(Parser)]
@@ -940,6 +943,46 @@ fn main() {
                                 println!("{}", serde_json::to_string_pretty(&cv_header).expect("failed to JSONify"));
                             } else {
                                 println!("{:#?}", cv_header);
+                            }
+                        },
+                        PokeExeMode::ClrResources(args) => {
+                            let mut input_file = File::open(&args.input_file)
+                                .expect("failed to open input file");
+                            let pe = binms::pe::Executable::read(&mut input_file)
+                                .expect("failed to read PE header");
+                            let optional_header = pe.optional_header.as_ref()
+                                .expect("PE file is missing optional header");
+                            let binms::pe::OptionalHeader::Coff(cough) = optional_header
+                                else { panic!("PE file's optional header is not COFF") };
+                            let optional_win_header = cough.optional_windows_header.as_ref()
+                                .expect("PE file's COFF optional header does not contain the optional Windows header");
+                            let clr_entry = optional_win_header.known_data_directory_entry(binms::pe::KnownDataDirectoryEntry::ClrRuntimeHeader)
+                                .expect("PE file does not have a CLR header directory entry");
+
+                            let clr_header_file_offset = pe.section_table.virtual_to_raw(clr_entry.address)
+                                .expect("failed to map CLR header virtual to raw address");
+                            input_file.seek(SeekFrom::Start(clr_header_file_offset.into()))
+                                .expect("failed to seek to CLR header");
+                            let mut buf = vec![0u8; clr_entry.size.try_into().unwrap()];
+                            input_file.read_exact(&mut buf)
+                                .expect("failed to read CLR header");
+                            let (_, clr_header) = binms::clr::header::ClrHeader::take_from_bytes(&buf)
+                                .expect("failed to decode CLR header");
+
+                            let clr_res_file_offset = pe.section_table.virtual_to_raw(clr_header.resources_range.address)
+                                .expect("failed to map CLR resources virtual to raw address");
+                            input_file.seek(SeekFrom::Start(clr_res_file_offset.into()))
+                                .expect("failed to seek to CLR resources");
+                            let mut buf = vec![0u8; clr_header.resources_range.length.try_into().unwrap()];
+                            input_file.read_exact(&mut buf)
+                                .expect("failed to read CLR resources");
+
+                            let resources = binms::clr::resources::collect_resource_containers(&buf);
+
+                            for (i, res) in resources.iter().enumerate() {
+                                let path = format!("res{}.bin", i);
+                                std::fs::write(&path, res)
+                                    .expect("failed to write resource file");
                             }
                         },
                     }
