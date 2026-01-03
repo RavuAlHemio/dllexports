@@ -977,12 +977,15 @@ fn main() {
                             input_file.read_exact(&mut buf)
                                 .expect("failed to read CLR resources");
 
-                            let resources = binms::clr::resources::collect_resource_containers(&buf);
-
-                            for (i, res) in resources.iter().enumerate() {
-                                let path = format!("res{}.bin", i);
-                                std::fs::write(&path, res)
-                                    .expect("failed to write resource file");
+                            let resources = binms::clr::resources::collect_wrapped_resource_containers(&buf);
+                            for res in resources.iter() {
+                                if res.len() == 0 {
+                                    // probably just padding
+                                    continue;
+                                }
+                                let (_, resource_container) = binms::clr::resources::ClrResourceContainer::take_from_bytes(res)
+                                    .expect("failed to decode resource container");
+                                println!("{:#?}", resource_container);
                             }
                         },
                     }
