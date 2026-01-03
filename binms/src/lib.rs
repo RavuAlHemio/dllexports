@@ -1,6 +1,7 @@
 pub mod bit_pattern_float;
 pub mod bitmap;
 pub mod bitmap_font;
+pub mod clr;
 pub mod code_view;
 pub mod ico1;
 pub mod icon_group;
