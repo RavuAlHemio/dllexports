@@ -14,104 +14,14 @@
 
 
 use display_bytes::DisplayBytesVec;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::{debug, error};
 
 use crate::clr::Error;
 use crate::int_from_byte_slice::IntFromByteSlice;
 
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[repr(u64)]
-pub enum ResourceType {
-    Null = 0,
-    String = 1,
-    Boolean = 2,
-    Char = 3,
-    Byte = 4,
-    SignedByte = 5,
-    Int16 = 6,
-    UInt16 = 7,
-    Int32 = 8,
-    UInt32 = 9,
-    Int64 = 10,
-    UInt64 = 11,
-    Single = 12,
-    Double = 13,
-    Decimal = 14,
-    DateTime = 15,
-    TimeSpan = 16,
-
-    ByteArray = 32,
-    Stream = 33,
-
-    // >= 64
-    Custom(u64),
-}
-impl TryFrom<u64> for ResourceType {
-    type Error = ();
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Null),
-            1 => Ok(Self::String),
-            2 => Ok(Self::Boolean),
-            3 => Ok(Self::Char),
-            4 => Ok(Self::Byte),
-            5 => Ok(Self::SignedByte),
-            6 => Ok(Self::Int16),
-            7 => Ok(Self::UInt16),
-            8 => Ok(Self::Int32),
-            9 => Ok(Self::UInt32),
-            10 => Ok(Self::Int64),
-            11 => Ok(Self::UInt64),
-            12 => Ok(Self::Single),
-            13 => Ok(Self::Double),
-            14 => Ok(Self::Decimal),
-            15 => Ok(Self::DateTime),
-            16 => Ok(Self::TimeSpan),
-
-            32 => Ok(Self::ByteArray),
-            33 => Ok(Self::Stream),
-
-            custom_value if custom_value >= 64 => {
-                let custom_index = custom_value - 64;
-                Ok(Self::Custom(custom_index))
-            },
-            _ => Err(()),
-        }
-    }
-}
-impl From<ResourceType> for u64 {
-    fn from(value: ResourceType) -> Self {
-        match value {
-            ResourceType::Null => 0,
-            ResourceType::String => 1,
-            ResourceType::Boolean => 2,
-            ResourceType::Char => 3,
-            ResourceType::Byte => 4,
-            ResourceType::SignedByte => 5,
-            ResourceType::Int16 => 6,
-            ResourceType::UInt16 => 7,
-            ResourceType::Int32 => 8,
-            ResourceType::UInt32 => 9,
-            ResourceType::Int64 => 10,
-            ResourceType::UInt64 => 11,
-            ResourceType::Single => 12,
-            ResourceType::Double => 13,
-            ResourceType::Decimal => 14,
-            ResourceType::DateTime => 15,
-            ResourceType::TimeSpan => 16,
-
-            ResourceType::ByteArray => 32,
-            ResourceType::Stream => 33,
-
-            ResourceType::Custom(custom_index) => custom_index + 64,
-        }
-    }
-}
-
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClrResourceContainer {
     // magic: u32, // 0xBEEFCACE
     pub reader_count: u32,
@@ -319,13 +229,120 @@ impl ClrResourceContainer {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClrResource {
     pub name: String,
     pub name_hash: u32,
     pub resource_type: ResourceType,
     pub data: DisplayBytesVec,
 }
+
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u64)]
+pub enum ResourceType {
+    Null = 0,
+    String = 1,
+    Boolean = 2,
+    Char = 3,
+    Byte = 4,
+    SignedByte = 5,
+    Int16 = 6,
+    UInt16 = 7,
+    Int32 = 8,
+    UInt32 = 9,
+    Int64 = 10,
+    UInt64 = 11,
+    Single = 12,
+    Double = 13,
+    Decimal = 14,
+    DateTime = 15,
+    TimeSpan = 16,
+
+    ByteArray = 32,
+    Stream = 33,
+
+    // >= 64
+    Custom(u64),
+}
+impl TryFrom<u64> for ResourceType {
+    type Error = ();
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Null),
+            1 => Ok(Self::String),
+            2 => Ok(Self::Boolean),
+            3 => Ok(Self::Char),
+            4 => Ok(Self::Byte),
+            5 => Ok(Self::SignedByte),
+            6 => Ok(Self::Int16),
+            7 => Ok(Self::UInt16),
+            8 => Ok(Self::Int32),
+            9 => Ok(Self::UInt32),
+            10 => Ok(Self::Int64),
+            11 => Ok(Self::UInt64),
+            12 => Ok(Self::Single),
+            13 => Ok(Self::Double),
+            14 => Ok(Self::Decimal),
+            15 => Ok(Self::DateTime),
+            16 => Ok(Self::TimeSpan),
+
+            32 => Ok(Self::ByteArray),
+            33 => Ok(Self::Stream),
+
+            custom_value if custom_value >= 64 => {
+                let custom_index = custom_value - 64;
+                Ok(Self::Custom(custom_index))
+            },
+            _ => Err(()),
+        }
+    }
+}
+impl From<ResourceType> for u64 {
+    fn from(value: ResourceType) -> Self {
+        match value {
+            ResourceType::Null => 0,
+            ResourceType::String => 1,
+            ResourceType::Boolean => 2,
+            ResourceType::Char => 3,
+            ResourceType::Byte => 4,
+            ResourceType::SignedByte => 5,
+            ResourceType::Int16 => 6,
+            ResourceType::UInt16 => 7,
+            ResourceType::Int32 => 8,
+            ResourceType::UInt32 => 9,
+            ResourceType::Int64 => 10,
+            ResourceType::UInt64 => 11,
+            ResourceType::Single => 12,
+            ResourceType::Double => 13,
+            ResourceType::Decimal => 14,
+            ResourceType::DateTime => 15,
+            ResourceType::TimeSpan => 16,
+
+            ResourceType::ByteArray => 32,
+            ResourceType::Stream => 33,
+
+            ResourceType::Custom(custom_index) => custom_index + 64,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for ResourceType {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        let resource_type_int = u64::deserialize(deserializer)?;
+        Self::try_from(resource_type_int)
+            .map_err(|_| D::Error::custom("invalid resource type"))
+    }
+}
+impl Serialize for ResourceType {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let resource_type_int: u64 = (*self).into();
+        resource_type_int.serialize(serializer)
+    }
+}
+
 
 fn utf16_le_bytes_to_string(slice: &[u8]) -> Result<String, Error> {
     if slice.len() % 2 != 0 {

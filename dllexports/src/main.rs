@@ -98,7 +98,7 @@ enum PokeExeMode {
     Nt4DbgInfo(DebugFileArgs),
 
     /// Outputs Common Language Runtime resources.
-    ClrResources(InputFileOnlyArgs),
+    ClrResources(InputFileOptionalCborOutputArgs),
 }
 
 #[derive(Parser)]
@@ -141,6 +141,15 @@ struct InputFileJsonOutputArgs {
     pub json_output: bool,
 
     pub input_file: PathBuf,
+}
+
+#[derive(Parser)]
+struct InputFileOptionalCborOutputArgs {
+    pub input_file: PathBuf,
+
+    /// If specified, the data is not output in a human-redable format on stdout but as CBOR into
+    /// the given file.
+    pub cbor_output: Option<PathBuf>,
 }
 
 
@@ -977,6 +986,7 @@ fn main() {
                             input_file.read_exact(&mut buf)
                                 .expect("failed to read CLR resources");
 
+                            let mut resource_containers = Vec::new();
                             let resources = binms::clr::resources::collect_wrapped_resource_containers(&buf);
                             for res in resources.iter() {
                                 if res.len() == 0 {
@@ -985,7 +995,20 @@ fn main() {
                                 }
                                 let (_, resource_container) = binms::clr::resources::ClrResourceContainer::take_from_bytes(res)
                                     .expect("failed to decode resource container");
-                                println!("{:#?}", resource_container);
+                                if args.cbor_output.is_some() {
+                                    resource_containers.push(resource_container);
+                                } else {
+                                    println!("{:#?}", resource_container);
+                                }
+                            }
+
+                            if let Some(cbor_path) = args.cbor_output.as_ref() {
+                                let mut cbor_file = File::create(cbor_path)
+                                    .expect("failed to open output CBOR file");
+                                ciborium::into_writer(&resource_containers, &mut cbor_file)
+                                    .expect("failed to serialize CBOR");
+                                cbor_file.flush()
+                                    .expect("failed to flush output CBOR file");
                             }
                         },
                     }

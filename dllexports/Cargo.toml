@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 binms = { path = "../binms", features = ["serde"] }
+ciborium = { version = "0.2" }
 clap = { version = "4.5", features = ["derive"] }
 display-bytes = { path = "../display-bytes" }
 expandms = { path = "../expandms" }
