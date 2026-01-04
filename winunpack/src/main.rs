@@ -180,14 +180,20 @@ fn main() {
         .filter(|(_idx, ed)| ed == "Ultimate")
         .map(|(idx, _ed)| *idx)
         .nth(0);
+    let ent_index = index_edition
+        .iter()
+        .filter(|(_idx, ed)| ed == "Enterprise")
+        .map(|(idx, _ed)| *idx)
+        .nth(0);
     let pro_index = index_edition
         .iter()
         .filter(|(_idx, ed)| ed == "Professional")
         .map(|(idx, _ed)| *idx)
         .nth(0);
     let best_index = ultimate_index
+        .or(ent_index)
         .or(pro_index)
-        .expect("found neither Ultimate nor Professional edition");
+        .expect("found neither Ultimate nor Enterprise nor Professional edition");
 
     // select that image
     let best_image = wim.select_image(best_index);
